@@ -1,0 +1,70 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COCBot Docker Compose
+#
+# Services:
+#   android   — Headless Android 11 emulator (budtmo/docker-android)
+#               Exposes ADB on port 5555, noVNC web viewer on port 6080
+#
+#   cocbot    — The Python bot (waits for android to be ready, then runs)
+#
+# Requirements on the host:
+#   - KVM must be available: ls /dev/kvm
+#   - For cloud VMs: enable nested virtualization (GCP) or use bare metal (AWS)
+#
+# Usage:
+#   docker compose up -d          # Start everything
+#   docker compose logs -f cocbot # Watch bot logs
+#   docker compose down           # Stop everything
+#
+# To watch the emulator screen: open http://localhost:6080 in your browser
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  android:
+    image: budtmo/docker-android:emulator_11.0
+    container_name: coc_android
+    privileged: true
+    devices:
+      - /dev/kvm   # Required for hardware-accelerated emulation
+    ports:
+      - "5555:5555"   # ADB TCP port
+      - "6080:6080"   # noVNC web viewer (view the screen in browser)
+    environment:
+      EMULATOR_DEVICE: "Samsung Galaxy S10"
+      WEB_VNC: "true"
+      APPIUM: "false"
+    volumes:
+      - android_data:/root
+    healthcheck:
+      # Wait until ADB reports the emulator is online
+      test: ["CMD", "adb", "-s", "emulator-5554", "shell", "echo", "ok"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s   # Android takes time to boot
+    restart: unless-stopped
+
+  cocbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: coc_bot
+    depends_on:
+      android:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override ADB host to point at the android service
+      ADB_HOST: android
+      ADB_PORT: "5555"
+    volumes:
+      - ./assets:/app/assets       # Template images
+      - ./logs:/app/logs           # Persistent logs
+    restart: unless-stopped
+
+volumes:
+  android_data:

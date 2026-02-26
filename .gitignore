@@ -1,0 +1,58 @@
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+*.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Poetry ────────────────────────────────────────────────────────────────────
+# Keep poetry.lock committed for reproducible installs
+# poetry.lock
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Assets / templates (captured from your own screen — don't commit) ─────────
+assets/templates/*.png
+assets/templates/*.jpg
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── IDEs ─────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ── pytest / coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+.mypy_cache/
+
+# ── ruff ──────────────────────────────────────────────────────────────────────
+.ruff_cache/
+
+# ── Docker volumes ────────────────────────────────────────────────────────────
+android_data/

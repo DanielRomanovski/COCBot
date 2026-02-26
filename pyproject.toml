@@ -1,0 +1,74 @@
+[tool.poetry]
+name = "cocbot"
+version = "0.1.0"
+description = "Clash of Clans automation bot — screen-based ADB automation + official API"
+authors = ["daniel"]
+readme = "README.md"
+packages = [{ include = "cocbot", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Official CoC API wrapper (read-only: clans, wars, players, raids)
+coc-py = "^4.0"
+
+# ADB Python bindings — talk to the Android emulator
+adbutils = "^2.8"
+
+# Computer vision — template matching to find UI elements on screen
+opencv-python-headless = "^4.9"
+
+# Image handling
+Pillow = "^10.3"
+
+# OCR — read gold/elixir/dark elixir numbers from screenshots
+pytesseract = "^0.3.10"
+
+# Async support (coc.py is fully async)
+# asyncio is built-in, but these are useful
+aiohttp = "^3.9"
+aiofiles = "^23.2"
+
+# Config / environment
+python-dotenv = "^1.0"
+pydantic = "^2.7"
+pydantic-settings = "^2.3"
+
+# Scheduling / timing
+APScheduler = "^3.10"
+
+# Logging
+loguru = "^0.7"
+
+# Optional: AI-powered base analysis
+# google-generativeai = "^0.5"   # Uncomment to enable Gemini Vision
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2"
+pytest-asyncio = "^0.23"
+ruff = "^0.4"
+mypy = "^1.10"
+ipython = "^8.24"
+
+[tool.poetry.scripts]
+cocbot = "cocbot.main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
