@@ -11,6 +11,7 @@ Wraps `adbutils` to provide a clean interface for:
 from __future__ import annotations
 
 import io
+import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -64,6 +65,12 @@ class ADBDevice:
 
         logger.info("Connecting to ADB device: {}", serial)
 
+        # Fresh ADB server cycle — required for BlueStacks which only holds the
+        # shell channel open briefly after the initial connect handshake.
+        subprocess.run(["adb", "kill-server"], capture_output=True)
+        subprocess.run(["adb", "start-server"], capture_output=True)
+        time.sleep(1.0)
+
         # Tell the local ADB server to connect to the remote emulator
         if not self.config.serial:
             result = self._client.connect(serial, timeout=self.config.connect_timeout)
@@ -76,6 +83,8 @@ class ADBDevice:
                 self._device = self._client.device(serial)
                 info = self._device.prop.model
                 logger.success("Connected to device: {} (model={})", serial, info)
+                # Give the ADB shell channel a moment to fully open
+                time.sleep(2.0)
                 return
             except AdbError as e:
                 logger.warning("Waiting for device... ({})", e)
@@ -87,6 +96,25 @@ class ADBDevice:
         if self._device:
             logger.info("Disconnecting ADB device")
             self._device = None
+
+    @property
+    def _serial(self) -> str:
+        """Return the serial string used for adb -s <serial>."""
+        if self.config.serial:
+            return self.config.serial
+        return f"{self.config.host}:{self.config.port}"
+
+    def _shell(self, cmd: str) -> str:
+        """
+        Run an adb shell command via the adb binary (subprocess).
+        This is more reliable than adbutils .shell() with BlueStacks.
+        """
+        result = subprocess.run(
+            ["adb", "-s", self._serial, "shell", cmd],
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
 
     def __enter__(self) -> "ADBDevice":
         self.connect()
@@ -112,15 +140,20 @@ class ADBDevice:
         np.ndarray
             BGR image array (OpenCV format), shape (height, width, 3)
         """
-        raw: bytes = self.device.screenshot()  # returns PNG bytes via adbutils
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        raw = self.device.screenshot()  # newer adbutils returns PIL Image directly
+        if isinstance(raw, Image.Image):
+            img = raw.convert("RGB")
+        else:
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
         arr = np.array(img)
         # PIL gives RGB; convert to BGR for OpenCV
         return arr[:, :, ::-1].copy()
 
     def screenshot_pil(self) -> Image.Image:
         """Return the screenshot as a PIL Image (RGB)."""
-        raw: bytes = self.device.screenshot()
+        raw = self.device.screenshot()
+        if isinstance(raw, Image.Image):
+            return raw.convert("RGB")
         return Image.open(io.BytesIO(raw)).convert("RGB")
 
     # ── Input: Tap ────────────────────────────────────────────────────────────
@@ -128,13 +161,12 @@ class ADBDevice:
     def tap(self, x: int, y: int) -> None:
         """Send a single tap at (x, y)."""
         logger.debug("TAP ({}, {})", x, y)
-        self.device.shell(f"input tap {x} {y}")
+        self._shell(f"input tap {x} {y}")
 
     def long_press(self, x: int, y: int, duration_ms: int = 800) -> None:
         """Long press at (x, y) for duration_ms milliseconds."""
         logger.debug("LONG_PRESS ({}, {}) {}ms", x, y, duration_ms)
-        # swipe to same point with a duration = long press
-        self.device.shell(f"input swipe {x} {y} {x} {y} {duration_ms}")
+        self._shell(f"input swipe {x} {y} {x} {y} {duration_ms}")
 
     # ── Input: Swipe ─────────────────────────────────────────────────────────
 
@@ -148,7 +180,7 @@ class ADBDevice:
     ) -> None:
         """Swipe from (x1, y1) to (x2, y2) over duration_ms milliseconds."""
         logger.debug("SWIPE ({},{}) → ({},{}) {}ms", x1, y1, x2, y2, duration_ms)
-        self.device.shell(f"input swipe {x1} {y1} {x2} {y2} {duration_ms}")
+        self._shell(f"input swipe {x1} {y1} {x2} {y2} {duration_ms}")
 
     def scroll_down(self, amount: int = 400) -> None:
         """Scroll down by `amount` pixels from the centre of the screen."""
@@ -165,25 +197,23 @@ class ADBDevice:
 
     def press_back(self) -> None:
         """Press the Android Back button."""
-        self.device.shell("input keyevent 4")
+        self._shell("input keyevent 4")
 
     def press_home(self) -> None:
         """Press the Android Home button."""
-        self.device.shell("input keyevent 3")
+        self._shell("input keyevent 3")
 
     # ── App Control ──────────────────────────────────────────────────────────
 
     def launch_coc(self) -> None:
         """Launch Clash of Clans."""
         logger.info("Launching Clash of Clans ({})", COC_PACKAGE)
-        self.device.shell(
-            f"monkey -p {COC_PACKAGE} -c android.intent.category.LAUNCHER 1"
-        )
+        self._shell(f"monkey -p {COC_PACKAGE} -c android.intent.category.LAUNCHER 1")
 
     def force_stop_coc(self) -> None:
         """Force-stop Clash of Clans."""
         logger.info("Force-stopping Clash of Clans")
-        self.device.shell(f"am force-stop {COC_PACKAGE}")
+        self._shell(f"am force-stop {COC_PACKAGE}")
 
     def restart_coc(self, wait_s: float = 5.0) -> None:
         """Force-stop then re-launch CoC."""
@@ -193,14 +223,14 @@ class ADBDevice:
 
     def is_coc_running(self) -> bool:
         """Return True if CoC is in the foreground."""
-        output = self.device.shell("dumpsys window windows | grep mCurrentFocus")
+        output = self._shell("dumpsys window windows | grep mCurrentFocus")
         return COC_PACKAGE in output
 
     # ── Diagnostics ──────────────────────────────────────────────────────────
 
     def get_resolution(self) -> tuple[int, int]:
         """Query actual screen resolution from the device."""
-        output = self.device.shell("wm size")
+        output = self._shell("wm size")
         # Output: "Physical size: 1080x1920"
         try:
             size_part = output.split(":")[-1].strip()

@@ -42,6 +42,7 @@ loguru = "^0.7"
 
 # Optional: AI-powered base analysis
 # google-generativeai = "^0.5"   # Uncomment to enable Gemini Vision
+pyautogui = "^0.9.54"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"
