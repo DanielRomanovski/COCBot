@@ -65,10 +65,10 @@ class ADBDevice:
 
         logger.info("Connecting to ADB device: {}", serial)
 
-        # Fresh ADB server cycle — required for BlueStacks which only holds the
-        # shell channel open briefly after the initial connect handshake.
-        subprocess.run(["adb", "kill-server"], capture_output=True)
-        subprocess.run(["adb", "start-server"], capture_output=True)
+        # Use absolute path to adb.exe
+        adb_path = r"E:\github projects\cocbot\platform-tools\platform-tools\adb.exe"
+        subprocess.run([adb_path, "kill-server"], capture_output=True)
+        subprocess.run([adb_path, "start-server"], capture_output=True)
         time.sleep(1.0)
 
         # Tell the local ADB server to connect to the remote emulator
@@ -109,8 +109,9 @@ class ADBDevice:
         Run an adb shell command via the adb binary (subprocess).
         This is more reliable than adbutils .shell() with BlueStacks.
         """
+        adb_path = r"E:\github projects\cocbot\platform-tools\platform-tools\adb.exe"
         result = subprocess.run(
-            ["adb", "-s", self._serial, "shell", cmd],
+            [adb_path, "-s", self._serial, "shell", cmd],
             capture_output=True,
             text=True,
         )

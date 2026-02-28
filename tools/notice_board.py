@@ -40,31 +40,40 @@ from loguru import logger
 
 from cocbot.adb.device import ADBDevice, DeviceConfig
 from cocbot.config import settings
-from filter_players import filter_players
+
+# Placeholder for find_players
+def find_players(device):
+  pass
 
 
-# ── Notice board navigation coords ───────────────────────────────────────────
-NAV_CLAN_BUTTON    = (106,  78)   # Opens the clan tab
-NAV_NOTICE_BOARD   = (1508, 120)  # Opens the notice board inside clan tab
 
-# ── Clan card coordinates (device pixels) ─────────────────────────────────────
-# After the FIRST scroll
-CLANS_BATCH_1 = [
-    (752,  390),
-    (1772, 390),
-    (774,  744),
-    (1738, 728),
-    (770,  1200),
-    (1788, 1220),
+# ── Chord definitions (device coordinates) ───────────────────────────────────
+PROFILE_BUTTON = (76, 62)
+CLANS_BUTTON = (1136, 90)
+SCROLL_X = 540  # middle of 1080-wide screen
+SCROLL_FROM_Y = 1600
+SCROLL_TO_Y = 400
+SCROLL_DURATION = 500
+
+CLAN_CHORDS = [
+  (554, 310),  # Clan 1
+  (800, 868),  # View Clan
+  (268, 78),   # Go Back to Clan Search
+  (1322, 306), # Clan 2
+  (584, 572),  # Clan 3
+  (1328, 560), # Clan 4
+  (578, 906),  # Clan 5
+  (1318, 888), # Clan 6
 ]
 
-# After THREE more scrolls
-CLANS_BATCH_2 = [
-    (748,  452),
-    (1742, 466),
-    (774,  880),
-    (1774, 904),
+CLAN7_10_CHORDS = [
+  (606, 356),  # Clan 7
+  (1316, 342), # Clan 8
+  (594, 686),  # Clan 9
+  (1336, 670), # Clan 10
 ]
+
+REFRESH_BUTTON = (980, 940)
 
 # ── Scroll settings ───────────────────────────────────────────────────────────
 # A swipe upward (finger moves up) scrolls the list down to reveal more clans.
@@ -79,17 +88,31 @@ DELAY_AFTER_TAP   = 1.5    # time to let a clan profile open
 DELAY_AFTER_SCROLL = 0.5   # pause between scrolls
 
 
-def scroll_once(device: ADBDevice) -> None:
-    device.swipe(SCROLL_X, SCROLL_FROM_Y, SCROLL_X, SCROLL_TO_Y, SCROLL_DURATION)
-    time.sleep(DELAY_AFTER_SCROLL)
 
 
-def tap_clan(device: ADBDevice, x: int, y: int, index: int) -> None:
-    logger.info("Tapping clan {} at ({}, {})", index + 1, x, y)
-    device.tap(x, y)
-    time.sleep(DELAY_AFTER_TAP)
-    filter_players(device)
-    time.sleep(0.5)  # brief pause before next tap
+def drag_menu_down(device: ADBDevice):
+  # Hold at (960, 1016), drag to (962, 724)
+  device.swipe(960, 1016, 962, 724, 600)
+  time.sleep(1)
+
+def drag_to_top(device: ADBDevice):
+  # Drag from (960, 1016) to (960, 0) to reach the top
+  device.swipe(960, 1016, 960, 0, 800)
+  time.sleep(1)
+
+def fast_scroll_to_bottom(device: ADBDevice):
+    # 10 fast swipes to go to the bottom
+    center_x = settings.emulator_width // 2
+    for _ in range(10):
+        device.swipe(center_x, SCROLL_FROM_Y, center_x, SCROLL_TO_Y, 200)
+        time.sleep(0.2)
+
+
+
+def tap(device: ADBDevice, x: int, y: int, label: str):
+  logger.info(f"Tapping {label} at ({x}, {y})")
+  device.tap(x, y)
+  time.sleep(1)
 
 
 def main() -> None:
@@ -101,41 +124,57 @@ def main() -> None:
     )
     device = ADBDevice(cfg)
 
+
     logger.info("Connecting to ADB at {}:{}", settings.adb_host, settings.adb_port)
     device.connect()
 
-    # ── 1. Navigate to notice board ───────────────────────────────────────────
-    logger.info("Opening clan tab...")
-    device.tap(*NAV_CLAN_BUTTON)
-    time.sleep(1.0)
+    while True:
+      # Step 1: Press Profile
+      tap(device, *PROFILE_BUTTON, "Profile")
 
-    logger.info("Opening notice board...")
-    device.tap(*NAV_NOTICE_BOARD)
-    time.sleep(1.5)
+      # Step 2: Press Clans
+      tap(device, *CLANS_BUTTON, "Clans")
 
-    # ── 2. First scroll ───────────────────────────────────────────────────────
-    logger.info("Scrolling once to reveal first set of clans...")
-    scroll_once(device)
+      # Step 3: Drag menu down
+      drag_menu_down(device)
 
-    # ── 3. Tap first 6 clans ─────────────────────────────────────────────────
-    logger.info("Processing batch 1 ({} clans)...", len(CLANS_BATCH_1))
-    for i, (x, y) in enumerate(CLANS_BATCH_1):
-        tap_clan(device, x, y, i)
+      # Steps 4-9: Tap clans 1-6 (with view, find_players, back)
+      clan_steps = [
+        (554, 310, "Clan 1"),
+        (800, 868, "View Clan"),
+        (268, 78, "Go Back to Clan Search"),
+        (1322, 306, "Clan 2"),
+        (584, 572, "Clan 3"),
+        (1328, 560, "Clan 4"),
+        (578, 906, "Clan 5"),
+        (1318, 888, "Clan 6"),
+      ]
+      for i in range(6):
+        tap(device, clan_steps[i*1][0], clan_steps[i*1][1], clan_steps[i*1][2])
+        tap(device, 800, 868, "View Clan")
+        find_players(device)
+        tap(device, 268, 78, "Go Back to Clan Search")
 
-    # ── 4. Scroll 3 more times ────────────────────────────────────────────────
-    logger.info("Scrolling 3 times to reveal next set of clans...")
-    for _ in range(3):
-        scroll_once(device)
+      # Step 10: Drag to top after 6 clans
+      drag_to_top(device)
 
-    # ── 5. Tap next 4 clans ───────────────────────────────────────────────────
-    logger.info("Processing batch 2 ({} clans)...", len(CLANS_BATCH_2))
-    for i, (x, y) in enumerate(CLANS_BATCH_2):
-        tap_clan(device, x, y, len(CLANS_BATCH_1) + i)
+      # Steps 11-14: Tap clans 7-10 (with view, find_players, back)
+      clan7_10 = [
+        (606, 356, "Clan 7"),
+        (1316, 342, "Clan 8"),
+        (594, 686, "Clan 9"),
+        (1336, 670, "Clan 10"),
+      ]
+      for x, y, label in clan7_10:
+        tap(device, x, y, label)
+        tap(device, 800, 868, "View Clan")
+        find_players(device)
+        tap(device, 268, 78, "Go Back to Clan Search")
 
-    logger.success(
-        "Done — processed {} clans total.",
-        len(CLANS_BATCH_1) + len(CLANS_BATCH_2),
-    )
+      # Step 15: Tap Refresh button
+      tap(device, *REFRESH_BUTTON, "Refresh")
+
+      logger.info("Cycle complete. Restarting...")
 
 
 if __name__ == "__main__":

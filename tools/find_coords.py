@@ -47,13 +47,8 @@ def main():
     device.connect()
 
     print(f"Connected. Taking screenshot from {settings.emulator_width}×{settings.emulator_height}...")
-    screenshot = device.screenshot()
 
     scale = 0.5
-    dw = int(screenshot.shape[1] * scale)
-    dh = int(screenshot.shape[0] * scale)
-    display = cv2.resize(screenshot, (dw, dh))
-
     cv2.namedWindow("Click to get coordinates — ESC to quit")
     cv2.setMouseCallback(
         "Click to get coordinates — ESC to quit",
@@ -61,12 +56,45 @@ def main():
         param={"scale": scale},
     )
 
-    print("Click anywhere on the image to print coordinates. Press ESC to quit.\n")
+    print("Click anywhere on the image to print coordinates. Press ESC to quit. Press 'r' in terminal to retake screenshot.\n")
+
+    import threading
+    import queue
+
+    key_queue = queue.Queue()
+
+    def key_listener():
+        while True:
+            key = input()
+            key_queue.put(key)
+            if key.lower() == 'esc':
+                break
+
+    listener_thread = threading.Thread(target=key_listener, daemon=True)
+    listener_thread.start()
+
+    def take_screenshot():
+        screenshot = device.screenshot()
+        dw = int(screenshot.shape[1] * scale)
+        dh = int(screenshot.shape[0] * scale)
+        return cv2.resize(screenshot, (dw, dh))
+
+    display = take_screenshot()
 
     while True:
         cv2.imshow("Click to get coordinates — ESC to quit", display)
-        if cv2.waitKey(1) == 27:
+        key = cv2.waitKey(1)
+        # ESC key in window
+        if key == 27:
             break
+        # Check for 'r' in terminal
+        if not key_queue.empty():
+            user_key = key_queue.get()
+            if user_key.lower() == 'r':
+                print("Retaking screenshot...")
+                display = take_screenshot()
+            elif user_key.lower() == 'esc':
+                break
 
     cv2.destroyAllWindows()
 
