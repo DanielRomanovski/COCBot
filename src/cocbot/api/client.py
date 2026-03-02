@@ -80,7 +80,11 @@ class CoCAPIClient:
 
     async def start(self) -> None:
         """Initialise the coc.py client using a static API token."""
-        self._client = await coc.login_with_tokens(self._token)
+        # raw_attribute=True keeps the original API dict as _raw_data on every
+        # coc.py model object — needed to read fields that coc.py doesn't map
+        # (e.g. lastOnline on ClanMember).
+        self._client = coc.Client(raw_attribute=True)
+        await self._client.login_with_tokens(self._token)
         logger.info("CoC API client started")
 
     async def close(self) -> None:

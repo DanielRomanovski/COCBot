@@ -1,264 +1,239 @@
-# COCBot — Clash of Clans Automation Framework
+# CoCBot
 
-A **server-side** CoC bot built in Python. Runs entirely headless on a Linux server using a dockerised Android emulator — no physical device or monitor required.
+Automated Clash of Clans clan management bot.  
+Runs on a Windows machine — controls the game via ADB on an Android emulator, and is managed through Discord slash commands.
 
 ---
 
-## Architecture
+## What it does
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    COCBot (Python)                           │
-│                                                             │
-│  src/cocbot/                                                │
-│    config.py          ← Pydantic settings from .env        │
-│    main.py            ← Entry point & task scheduler       │
-│                                                             │
-│    adb/                                                     │
-│      device.py        ← ADB TCP connection, screenshot,    │
-│                          tap, swipe, app control            │
-│      input.py         ← Async human-like input wrapper     │
-│                                                             │
-│    vision/                                                  │
-│      matcher.py       ← OpenCV template matching           │
-│      ocr.py           ← pytesseract number/text reading    │
-│                                                             │
-│    api/                                                     │
-│      client.py        ← coc.py official API wrapper        │
-│                          (read-only: players, clans, wars)  │
-│                                                             │
-│    game/                                                    │
-│      state.py         ← Screen state machine               │
-│      navigator.py     ← High-level navigation (menus)      │
-│      resources.py     ← Resource dataclasses               │
-│                                                             │
-│    tasks/                                                   │
-│      farm.py          ← Farming loop (find → assess → atk) │
-│      war.py           ← War monitoring via API             │
-│                                                             │
-│    utils/                                                   │
-│      delays.py        ← Human-like random delay helpers    │
-│      logging.py       ← Loguru setup                       │
-└─────────────────────────────────────────────────────────────┘
-         │ ADB TCP (port 5555)
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Docker: budtmo/docker-android:emulator_11.0               │
-│  - Full Android 11 emulator                                 │
-│  - noVNC web viewer on port 6080                            │
-│  - ADB exposed on port 5555                                 │
-│  - Requires /dev/kvm on the host                            │
-└─────────────────────────────────────────────────────────────┘
-         │ KVM
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Linux server with KVM support                              │
-│  (bare metal or KVM-enabled cloud VM)                       │
-└─────────────────────────────────────────────────────────────┘
-```
+| Feature | Description |
+|---|---|
+| **Auto-invite loop** | Scans the in-game Notice Board, filters players by Town Hall / donations, sends invites |
+| **Auto-moderation** | Scores every clan member by inactivity, kicks the worst offenders when the clan is full |
+| **Activity tracker** | Polls the official CoC API every N hours and records when each member was last active |
+| **Discord bot** | Full control and monitoring from Discord — no SSH needed |
+| **Console log** | Every tap, API call, and log line is posted to a Discord `#console` channel in real time |
+
+### Discord commands
+
+| Command | Who | Description |
+|---|---|---|
+| `/leaderboard` | anyone | Clan activity ranked best → worst, with kick targets marked |
+| `/invite start [moderate]` | admin | Start the notice-board scan + invite loop |
+| `/invite stop` | admin | Stop the loop |
+| `/invite status` | anyone | Loop state + current filter values |
+| `/config [key] [value]` | admin (write) | View or change any setting live — no restart needed |
+| `/screenshot` | admin | Capture the emulator screen and post it |
+| `/forcemenu` | admin | Press ESC ×7 + Cancel to recover to the main screen |
+| `/help` | anyone | Full command reference |
 
 ---
 
 ## Requirements
 
-### Server
-- **Linux** with `/dev/kvm` available (hardware virtualisation)
-  - AWS: use bare metal instances (`i3.metal`, `c5.metal`)
-  - GCP: enable nested virtualisation on your VM
-  - Azure: enable nested virtualisation
-  - Standard VMs **without KVM will not work** (emulator too slow)
-- Docker + Docker Compose
-- Python 3.11+ (only needed for local dev — Docker has it)
-
-### Local dev (macOS/Linux)
-- Python 3.11+
-- Poetry
-- `tesseract` installed: `brew install tesseract` / `apt install tesseract-ocr`
-- ADB: `brew install android-platform-tools` / `apt install adb`
+- Windows 10 or 11 (64-bit)
+- Python **3.11** or newer — [python.org/downloads](https://www.python.org/downloads/)  
+  *(tick "Add python.exe to PATH" during install)*
+- An Android emulator (see below)
+- A Supercell developer API token — [developer.clashofclans.com](https://developer.clashofclans.com)
+- A Discord bot token — [discord.com/developers/applications](https://discord.com/developers/applications)
 
 ---
 
-## Quick Start
+## Install — one command
 
-### 1. Clone & configure
-
-```bash
-git clone <your-repo>
-cd COCBot
-cp .env.example .env
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-Edit `.env`:
-- `COC_API_TOKEN` — get from https://developer.clashofclans.com (IP-locked)
-- `PLAYER_TAG` — your account's player tag
-- `CLAN_TAG` — your clan tag (optional, for war monitoring)
+This will:
+1. Check Python 3.11+
+2. Create a `.venv` virtual environment
+3. Install all dependencies
+4. Copy `.env.example` → `.env`
 
-### 2. Start the emulator
-
-```bash
-# Check KVM is available
-ls /dev/kvm
-
-# Start the Android emulator
-docker compose up android -d
-
-# Watch it boot (takes ~2–3 minutes first time)
-docker compose logs -f android
-
-# View the screen in your browser
-open http://your-server-ip:6080
-```
-
-### 3. Set up Clash of Clans on the emulator
-
-Once the emulator is running:
-
-1. Open http://your-server-ip:6080 in a browser (noVNC)
-2. Open the Play Store and install Clash of Clans
-3. Log in to your account via Supercell ID
-4. Leave the game on the main village screen
-
-### 4. Capture template images
-
-Template images tell the bot what buttons look like. You need to capture them once:
-
-```bash
-# Install dev dependencies
-poetry install
-
-# For each UI element, run:
-python tools/capture_template.py --name state_village
-python tools/capture_template.py --name state_attack_menu
-python tools/capture_template.py --name state_loot_preview
-python tools/capture_template.py --name state_in_battle
-python tools/capture_template.py --name state_battle_result
-python tools/capture_template.py --name state_searching
-```
-
-A window will pop up showing the current screen — click and drag to select the element, then press Enter to save it to `assets/templates/`.
-
-### 5. Calibrate coordinates
-
-Button positions vary by device resolution. Verify the coordinates in `src/cocbot/game/navigator.py` match your emulator:
-
-```bash
-python tools/find_coords.py
-# Click on buttons to print their (x, y) coordinates
-```
-
-Update the `Coords` class in `navigator.py` to match.
-
-### 6. Run the bot
-
-```bash
-# Full Docker stack (recommended for server use)
-docker compose up -d
-
-# Or run locally (emulator in Docker, bot on host)
-poetry run cocbot
-
-# Watch logs
-docker compose logs -f cocbot
-# or
-tail -f logs/cocbot.log
-```
+Then open `.env` in a text editor and fill in your tokens (see [Configuration](#configuration)).
 
 ---
 
-## Configuration Reference
+## Android Emulator
 
-| Variable | Default | Description |
+You need an Android emulator to run Clash of Clans.  
+**BlueStacks is not recommended** — it is heavy, full of ads, and slow on older hardware.
+
+### Recommended: MuMu Player 12 *(free, no ads, lightweight)*
+
+1. Download from [mumuplayer.com](https://www.mumuplayer.com/) and install.
+2. Open MuMu Player, go to **Settings → Other settings** and enable **ADB debugging**.
+3. Set the resolution to **1920 × 1080**, 240 dpi.
+4. Install Clash of Clans from the built-in app store and log in with your Supercell ID.
+5. Leave the game on the main village screen.
+6. In `.env`, set:
+   ```
+   ADB_HOST=127.0.0.1
+   ADB_PORT=16384
+   EMULATOR_WIDTH=1920
+   EMULATOR_HEIGHT=1080
+   ```
+
+> ADB port for MuMu Player 12 is `16384` for the first instance.  
+> If you have multiple instances, use `16386`, `16388`, etc.
+
+### Alternative: LDPlayer 9 *(free, minimal ads)*
+
+1. Download from [ldplayer.net](https://www.ldplayer.net/) and install.
+2. Open LDPlayer, go to **Settings → Other → ADB debugging** → enable.
+3. Set resolution to **1920 × 1080**, 240 dpi.
+4. Install CoC, log in, leave on main screen.
+5. In `.env`:
+   ```
+   ADB_HOST=127.0.0.1
+   ADB_PORT=5555
+   ```
+
+### Alternative: Android SDK Emulator *(fully free, headless, no GUI needed)*
+
+> Best for running 24/7 on a headless Windows machine.  
+> Requires ~5 GB disk for the SDK.
+
+1. Download **Android command-line tools** from  
+   [developer.android.com/studio#command-line-tools-only](https://developer.android.com/studio#command-line-tools-only)
+2. Extract to `C:\android-sdk\cmdline-tools\latest\`
+3. Open PowerShell and run:
+   ```powershell
+   $env:ANDROID_HOME = "C:\android-sdk"
+   # Install an Android 30 image with Play Store
+   C:\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat `
+     "platform-tools" `
+     "emulator" `
+     "system-images;android-30;google_apis_playstore;x86_64"
+
+   # Create an AVD called "cocbot"
+   C:\android-sdk\cmdline-tools\latest\bin\avdmanager.bat create avd `
+     -n cocbot -k "system-images;android-30;google_apis_playstore;x86_64" `
+     --device "pixel_4"
+
+   # Start it headless (no window)
+   C:\android-sdk\emulator\emulator.exe -avd cocbot -no-window -no-audio
+   ```
+4. Install CoC via the Play Store (connect to it with `adb shell` or use a VNC viewer).
+5. In `.env`:
+   ```
+   ADB_HOST=127.0.0.1
+   ADB_PORT=5554
+   ```
+
+---
+
+## Configuration
+
+Edit `.env` (created by the installer):
+
+| Variable | Required | Description |
 |---|---|---|
-| `COC_API_TOKEN` | **required** | Supercell developer API token |
-| `PLAYER_TAG` | **required** | Player tag to monitor (e.g. `#ABC123`) |
-| `CLAN_TAG` | optional | Clan tag for war monitoring |
-| `ADB_HOST` | `localhost` | ADB host (use `android` in Docker) |
-| `ADB_PORT` | `5555` | ADB TCP port |
-| `EMULATOR_WIDTH` | `1080` | Screen width in pixels |
-| `EMULATOR_HEIGHT` | `1920` | Screen height in pixels |
-| `BOT_TASKS` | `farm` | Comma-separated tasks: `farm`, `war` |
-| `MIN_GOLD` | `200000` | Minimum gold to attack a base |
-| `MIN_ELIXIR` | `200000` | Minimum elixir to attack a base |
-| `MIN_DARK_ELIXIR` | `1000` | Minimum dark elixir to attack |
-| `MAX_SKIP_COUNT` | `50` | Max bases to skip before giving up |
-| `ATTACK_CYCLE_INTERVAL` | `600` | Seconds between attack cycles |
-| `BREAK_EVERY_N_CYCLES` | `10` | Take a break every N cycles (0=off) |
-| `MIN_ACTION_DELAY` | `0.3` | Min delay between actions (seconds) |
-| `MAX_ACTION_DELAY` | `1.2` | Max delay between actions (seconds) |
+| `COC_API_TOKEN` | ✅ | Token from [developer.clashofclans.com](https://developer.clashofclans.com) — **IP-locked** |
+| `PLAYER_TAG` | ✅ | Your CoC player tag (e.g. `#ABC123XYZ`) |
+| `ADB_HOST` | ✅ | ADB host — almost always `127.0.0.1` |
+| `ADB_PORT` | ✅ | ADB port — depends on emulator (see above) |
+| `EMULATOR_WIDTH` | ✅ | Emulator screen width in pixels |
+| `EMULATOR_HEIGHT` | ✅ | Emulator screen height in pixels |
+| `DISCORD_BOT_TOKEN` | ✅ | Token from [discord.com/developers/applications](https://discord.com/developers/applications) |
+| `DISCORD_GUILD_ID` | ✅ | Your Discord server ID |
+| `DISCORD_KICK_WEBHOOK` | optional | Webhook URL for kick-report messages |
+
+### Runtime settings (via `/config` in Discord)
+
+These can be changed live without restarting the bot:
+
+| Key | Default | Description |
+|---|---|---|
+| `min_th` | `14` | Minimum Town Hall to invite |
+| `max_th` | `18` | Maximum Town Hall to invite |
+| `min_donations` | `1000` | Minimum season donations to invite |
+| `invite_every` | `100` | Invite when this many players are queued |
+| `moderate_on_invite` | `false` | Also run moderation after each invite batch |
+| `players_to_kick` | `2` | Members to kick per moderation run |
+| `offline_threshold_days` | `7` | Never kick anyone active within this many days |
+| `dry_run` | `true` | `true` = press Cancel (safe test), `false` = real kicks |
+| `activity_check_interval_hours` | `3` | How often the activity tracker polls the API |
 
 ---
 
-## What the Official API Can Do
+## Running the bot
 
-The official Supercell API (`coc.py`) is **read-only** and used for monitoring:
+Make sure:
+- `.env` is filled in
+- The emulator is running with CoC on the **main village screen**
 
-| Feature | Available |
-|---|---|
-| Read player stats, troops, heroes | ✅ |
-| Read clan info, members, donations | ✅ |
-| Read current war state + attacks | ✅ |
-| Read CWL groups & rounds | ✅ |
-| Read capital raid log | ✅ |
-| Event polling (member joined, war state changed) | ✅ |
-| **Perform in-game actions** | ❌ Not possible |
-
-All actual in-game actions (attacking, donating, navigating menus) go through the ADB screen automation stack.
-
----
-
-## Extending the Bot
-
-### Custom troop deployment
-
-Override `FarmingTask.deploy_troops()` in a subclass:
-
-```python
-class GiantHealerFarm(FarmingTask):
-    async def deploy_troops(self) -> None:
-        # Drop giants first, then healers behind them
-        await self.input.deploy_troops_line(80, 800, 400, count=10)   # giants
-        await asyncio.sleep(2)
-        await self.input.deploy_troops_line(80, 900, 400, count=5)    # healers
+```powershell
+.venv\Scripts\python.exe tools\discord_bot.py
 ```
 
-### Adding new tasks
+The bot will print its startup lines to the terminal and post them to `#console` in Discord. From that point, all control is via Discord slash commands.
 
-Create a new file in `src/cocbot/tasks/` with an async class, then add it to the task runner in `main.py`.
+To keep it running permanently:
 
-### AI base analysis (optional)
+**Option A — Task Scheduler** (simplest)
+1. Open Task Scheduler → Create Basic Task
+2. Trigger: "When the computer starts"
+3. Action: Start a Program → `.venv\Scripts\python.exe`  
+   Add arguments: `tools\discord_bot.py`  
+   Start in: full path to this folder
 
-Uncomment `google-generativeai` in `pyproject.toml` and add `GEMINI_API_KEY` to `.env`. Then send screenshots to Gemini Vision API to decide whether to attack a base.
+**Option B — NSSM (Non-Sucking Service Manager)**
+```powershell
+# Download nssm from nssm.cc, then:
+nssm install CoCBot ".venv\Scripts\python.exe"
+nssm set CoCBot AppParameters "tools\discord_bot.py"
+nssm set CoCBot AppDirectory "C:\path\to\cocbot"
+nssm start CoCBot
+```
 
 ---
 
-## ⚠️ Legal Notice
+## Discord bot setup
 
-Automating Clash of Clans **violates Supercell's Terms of Service** and risks permanent account bans. Use at your own risk and only on accounts you are prepared to lose. The official API is safe to use for read-only stat tracking per Supercell's Fan Content Policy.
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications) → New Application.
+2. Bot → **Reset Token** → copy into `DISCORD_BOT_TOKEN`.
+3. Bot → scroll down → enable **Server Members Intent** and **Message Content Intent**.
+4. OAuth2 → URL Generator → Scopes: `bot`, `applications.commands`  
+   Bot Permissions: `Send Messages`, `Embed Links`, `Attach Files`, `Use Slash Commands`
+5. Copy the generated URL, paste it in a browser, and add the bot to your server.
+6. Right-click the server name → **Copy Server ID** → paste into `DISCORD_GUILD_ID`.
+7. Create a `#console` channel and add a webhook (Server Settings → Integrations → Webhooks).  
+   Paste the URL into the console_sink webhook constant in [tools/console_sink.py](tools/console_sink.py).
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
-COCBot/
-├── src/cocbot/            # Main package
-│   ├── adb/               # ADB device & input
-│   ├── api/               # Official CoC API client
-│   ├── game/              # State machine & navigation
-│   ├── tasks/             # High-level bot tasks
-│   ├── utils/             # Logging, delays
-│   ├── vision/            # OpenCV + OCR
-│   ├── config.py          # Pydantic settings
-│   └── main.py            # Entry point
-├── assets/
-│   └── templates/         # UI template images (add your own)
-├── tools/
-│   ├── capture_template.py # Interactive template capture
-│   └── find_coords.py      # Click to print coordinates
-├── tests/                 # Unit tests (no device needed)
-├── logs/                  # Runtime logs
-├── docker-compose.yml
-├── Dockerfile
-├── pyproject.toml
-└── .env.example
+cocbot/
+├── install.ps1              ← one-command Windows installer
+├── requirements.txt         ← pip dependencies
+├── pyproject.toml           ← poetry project config
+├── .env.example             ← copy to .env and fill in tokens
+│
+├── src/cocbot/
+│   ├── adb/device.py        ← ADB connection, tap, swipe, screenshot
+│   ├── api/client.py        ← CoC official API wrapper (read-only)
+│   ├── config.py            ← Pydantic settings from .env
+│   └── __init__.py
+│
+└── tools/
+    ├── discord_bot.py       ← Discord bot (main entry point)
+    ├── notice_board.py      ← ADB: scan notice board, collect clan lists
+    ├── find_players.py      ← ADB: filter and queue player tags from clans
+    ├── invite_players.py    ← ADB: search each tag and send invite
+    ├── moderation.py        ← API: rank members + ADB: kick worst members
+    ├── config_manager.py    ← Runtime config (bot_config.json)
+    ├── console_sink.py      ← Loguru → Discord #console webhook
+    └── capture_template.py  ← Dev tool: capture UI template images
 ```
+
+---
+
+## ⚠️ Legal notice
+
+Automating Clash of Clans **violates Supercell's Terms of Service** and may result in a permanent ban. Use only on accounts you are prepared to lose. The official CoC API is safe to use for read-only stat monitoring per the Supercell Fan Content Policy.

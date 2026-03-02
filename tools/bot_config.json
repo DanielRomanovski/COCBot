@@ -1,0 +1,11 @@
+{
+  "min_th": 14,
+  "max_th": 18,
+  "min_donations": 1000,
+  "invite_every": 3,
+  "moderate_on_invite": false,
+  "players_to_kick": 2,
+  "offline_threshold_days": 10.0,
+  "dry_run": true,
+  "activity_check_interval_hours": 3.0
+}

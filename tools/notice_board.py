@@ -40,14 +40,23 @@ from loguru import logger
 
 from cocbot.adb.device import ADBDevice, DeviceConfig
 from cocbot.config import settings
+from find_players import find_players, OUTPUT_FILE as PLAYERS_FILE
+from invite_players import invite_players, _go_to_main
+import config_manager
 
-# Placeholder for find_players
-def find_players(device):
-  pass
+# Invite threshold — now driven by bot_config.json (set via Discord /config invite_every)
+# Kept here only as fallback default.
+_INVITE_EVERY_DEFAULT = 100
 
 
 
-# ── Chord definitions (device coordinates) ───────────────────────────────────
+def _queued_players() -> int:
+    """Return number of player tags currently waiting in found_players.txt."""
+    if not PLAYERS_FILE.exists():
+        return 0
+    return sum(1 for line in PLAYERS_FILE.read_text().splitlines() if line.strip())
+
+
 PROFILE_BUTTON = (76, 62)
 CLANS_BUTTON = (1136, 90)
 SCROLL_X = 540  # middle of 1080-wide screen
@@ -57,8 +66,6 @@ SCROLL_DURATION = 500
 
 CLAN_CHORDS = [
   (554, 310),  # Clan 1
-  (800, 868),  # View Clan
-  (268, 78),   # Go Back to Clan Search
   (1322, 306), # Clan 2
   (584, 572),  # Clan 3
   (1328, 560), # Clan 4
@@ -116,6 +123,8 @@ def tap(device: ADBDevice, x: int, y: int, label: str):
 
 
 def main() -> None:
+    import console_sink
+    console_sink.setup("notice_board")
     cfg = DeviceConfig(
         host=settings.adb_host,
         port=settings.adb_port,
@@ -128,53 +137,70 @@ def main() -> None:
     logger.info("Connecting to ADB at {}:{}", settings.adb_host, settings.adb_port)
     device.connect()
 
+    CLAN_STEPS = [
+      (554, 310,  "Clan 1"),
+      (1322, 306, "Clan 2"),
+      (584, 572,  "Clan 3"),
+      (1328, 560, "Clan 4"),
+      (578, 906,  "Clan 5"),
+      (1318, 888, "Clan 6"),
+    ]
+
+    CLAN7_10_STEPS = [
+      (606, 356,  "Clan 7"),
+      (1316, 342, "Clan 8"),
+      (594, 686,  "Clan 9"),
+      (1336, 670, "Clan 10"),
+    ]
+
+    VIEW_CLAN   = (800, 868)
+    BACK_ARROW  = (268, 78)
+
+    def process_clans(steps) -> int:
+        """Tap each clan, call find_players, return total new players found."""
+        total = 0
+        for x, y, label in steps:
+            tap(device, x, y, label)
+            tap(device, *VIEW_CLAN, "View Clan")
+            total += find_players(device)
+            tap(device, *BACK_ARROW, "Go Back to Clan Search")
+        return total
+
+    # Navigate to the clan search page once
+    tap(device, *PROFILE_BUTTON, "Profile")
+    tap(device, *CLANS_BUTTON, "Clans")
+
     while True:
-      # Step 1: Press Profile
-      tap(device, *PROFILE_BUTTON, "Profile")
-
-      # Step 2: Press Clans
-      tap(device, *CLANS_BUTTON, "Clans")
-
-      # Step 3: Drag menu down
+      # Scroll down to reveal clans 1-6 in the first two columns
       drag_menu_down(device)
 
-      # Steps 4-9: Tap clans 1-6 (with view, find_players, back)
-      clan_steps = [
-        (554, 310, "Clan 1"),
-        (800, 868, "View Clan"),
-        (268, 78, "Go Back to Clan Search"),
-        (1322, 306, "Clan 2"),
-        (584, 572, "Clan 3"),
-        (1328, 560, "Clan 4"),
-        (578, 906, "Clan 5"),
-        (1318, 888, "Clan 6"),
-      ]
-      for i in range(6):
-        tap(device, clan_steps[i*1][0], clan_steps[i*1][1], clan_steps[i*1][2])
-        tap(device, 800, 868, "View Clan")
-        find_players(device)
-        tap(device, 268, 78, "Go Back to Clan Search")
+      # Clans 1-6
+      process_clans(CLAN_STEPS)
 
-      # Step 10: Drag to top after 6 clans
+      # Check after first batch
+      if _queued_players() >= config_manager.get("invite_every"):
+          logger.info("{} players queued — switching to invite mode", _queued_players())
+          invite_players(device, standalone=False)
+          tap(device, *PROFILE_BUTTON, "Profile")
+          tap(device, *CLANS_BUTTON, "Clans")
+          continue
+
+      # Drag back to the top to reach clans 7-10
       drag_to_top(device)
 
-      # Steps 11-14: Tap clans 7-10 (with view, find_players, back)
-      clan7_10 = [
-        (606, 356, "Clan 7"),
-        (1316, 342, "Clan 8"),
-        (594, 686, "Clan 9"),
-        (1336, 670, "Clan 10"),
-      ]
-      for x, y, label in clan7_10:
-        tap(device, x, y, label)
-        tap(device, 800, 868, "View Clan")
-        find_players(device)
-        tap(device, 268, 78, "Go Back to Clan Search")
+      # Clans 7-10
+      process_clans(CLAN7_10_STEPS)
 
-      # Step 15: Tap Refresh button
+      # Refresh loads a new set of clans
       tap(device, *REFRESH_BUTTON, "Refresh")
+      logger.info("Refresh complete — {} player(s) queued", _queued_players())
 
-      logger.info("Cycle complete. Restarting...")
+      # Check after second batch / refresh
+      if _queued_players() >= config_manager.get("invite_every"):
+          logger.info("{} players queued — switching to invite mode", _queued_players())
+          invite_players(device, standalone=False)
+          tap(device, *PROFILE_BUTTON, "Profile")
+          tap(device, *CLANS_BUTTON, "Clans")
 
 
 if __name__ == "__main__":
