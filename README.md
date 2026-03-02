@@ -32,28 +32,37 @@ Runs on a Windows machine — controls the game via ADB on an Android emulator, 
 
 ## Requirements
 
-- Windows 10 or 11 (64-bit)
-- Python **3.11** or newer — [python.org/downloads](https://www.python.org/downloads/)  
-  *(tick "Add python.exe to PATH" during install)*
-- An Android emulator (see below)
+| Platform | Supported |
+|---|---|
+| Windows 10 / 11 (64-bit) | ✅ use `install.ps1` |
+| Ubuntu 22.04 LTS (server/desktop) | ✅ use Docker Compose or `install.sh` |
+
+**All platforms need:**
 - A Supercell developer API token — [developer.clashofclans.com](https://developer.clashofclans.com)
 - A Discord bot token — [discord.com/developers/applications](https://discord.com/developers/applications)
 
 ---
 
-## Install — one command
+## Install
 
+**Windows:**
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-This will:
-1. Check Python 3.11+
-2. Create a `.venv` virtual environment
-3. Install all dependencies
-4. Copy `.env.example` → `.env`
+**Ubuntu:**
+```bash
+chmod +x install.sh && ./install.sh
+```
 
-Then open `.env` in a text editor and fill in your tokens (see [Configuration](#configuration)).
+**Ubuntu with Docker (recommended for servers):**
+```bash
+docker compose up android -d   # start emulator
+docker compose up -d bot       # start bot
+```
+See [Running on Ubuntu Server](#running-on-ubuntu-server-2204) for full instructions.
+
+Then open `.env` and fill in your tokens (see [Configuration](#configuration)).
 
 ---
 
@@ -160,7 +169,7 @@ These can be changed live without restarting the bot:
 
 ---
 
-## Running the bot
+## Running on Windows
 
 Make sure:
 - `.env` is filled in
@@ -192,6 +201,101 @@ nssm start CoCBot
 
 ---
 
+## Running on Ubuntu Server 22.04
+
+Two options — Docker Compose (recommended) or a direct Python install.
+
+### Option A — Docker Compose *(recommended)*
+
+Runs the Android emulator and the bot together in containers. No emulator setup needed on the host.
+
+**Prerequisites**
+```bash
+# Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER   # then log out and back in
+
+# KVM — required for the Android emulator
+sudo apt-get install -y qemu-kvm
+ls /dev/kvm   # must exist
+```
+
+**Setup**
+```bash
+git clone https://github.com/DanielRomanovski/COCBot.git
+cd COCBot
+cp .env.example .env
+nano .env   # fill in COC_API_TOKEN, PLAYER_TAG, DISCORD_BOT_TOKEN, DISCORD_GUILD_ID
+            # leave ADB_HOST/ADB_PORT as-is — docker-compose overrides them automatically
+```
+
+**Start the emulator first**
+```bash
+docker compose up android -d
+docker compose logs -f android   # wait until you see "Emulator is ready"
+```
+
+Then open **http://\<your-server-ip\>:6080** in a browser.  
+Inside the noVNC viewer, open the Play Store, install Clash of Clans, and log in with your Supercell ID. Leave the game on the main village screen.
+
+**Start the bot**
+```bash
+docker compose up -d bot
+docker compose logs -f bot
+```
+
+Both services restart automatically after reboots (`restart: unless-stopped`).
+
+**Useful commands**
+```bash
+docker compose logs -f          # all logs
+docker compose restart bot      # restart just the bot
+docker compose pull android     # update emulator image
+docker compose down             # stop everything
+```
+
+---
+
+### Option B — Direct install (venv)
+
+Use this if you already have an Android emulator running elsewhere and just want to run the bot process on Ubuntu.
+
+```bash
+git clone https://github.com/DanielRomanovski/COCBot.git
+cd COCBot
+chmod +x install.sh && ./install.sh
+nano .env   # fill in your tokens and ADB connection
+.venv/bin/python tools/discord_bot.py
+```
+
+**Keep it running with systemd**
+```bash
+sudo nano /etc/systemd/system/cocbot.service
+```
+```ini
+[Unit]
+Description=CoCBot
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/home/YOUR_USERNAME/COCBot
+ExecStart=/home/YOUR_USERNAME/COCBot/.venv/bin/python tools/discord_bot.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now cocbot
+sudo journalctl -u cocbot -f   # watch logs
+```
+
+---
+
 ## Discord bot setup
 
 1. Go to [discord.com/developers/applications](https://discord.com/developers/applications) → New Application.
@@ -210,7 +314,10 @@ nssm start CoCBot
 
 ```
 cocbot/
+├── Dockerfile               ← Docker image for the bot
+├── docker-compose.yml       ← Ubuntu server: emulator + bot together
 ├── install.ps1              ← one-command Windows installer
+├── install.sh               ← one-command Ubuntu installer (venv)
 ├── requirements.txt         ← pip dependencies
 ├── pyproject.toml           ← poetry project config
 ├── .env.example             ← copy to .env and fill in tokens

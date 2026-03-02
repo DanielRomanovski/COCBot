@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CoCBot — Docker Compose
+#
+# Runs two services:
+#   android  — budtmo/docker-android headless emulator with noVNC viewer
+#   bot      — the Python bot built from Dockerfile
+#
+# Requirements:
+#   - Docker + Docker Compose installed on the host
+#   - /dev/kvm available (Ubuntu: check with `ls /dev/kvm`)
+#     If missing: sudo apt-get install -y qemu-kvm && sudo modprobe kvm_intel
+#
+# Quick start:
+#   cp .env.example .env && nano .env   # fill in tokens
+#   docker compose up android -d        # start emulator first
+#   # wait ~3 minutes, then open http://<server-ip>:6080 to install + log in CoC
+#   docker compose up -d                # start bot
+#   docker compose logs -f bot          # watch logs
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Android emulator (headless, ADB over TCP, noVNC web viewer) ───────────
+  android:
+    image: budtmo/docker-android:emulator_13.0
+    privileged: true
+    ports:
+      - "6080:6080"    # noVNC — view/control the emulator at http://<host>:6080
+    environment:
+      - EMULATOR_DEVICE=Samsung Galaxy S10
+      - WEB_VNC=true
+      - DATAPARTITION=4096m   # 4 GB data partition — CoC needs space
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - android-data:/root    # persist installed apps across restarts
+    healthcheck:
+      # Boot takes 2-4 minutes. Consider boot complete when ADB lists an emulator.
+      test: ["CMD-SHELL", "adb devices | grep -q emulator"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  # ── CoCBot ────────────────────────────────────────────────────────────────
+  bot:
+    build: .
+    env_file:
+      - .env
+    environment:
+      # Override .env to point at the android container (Docker internal DNS)
+      - ADB_HOST=android
+      - ADB_PORT=5555
+    volumes:
+      # Persist runtime data so config/activity survive container rebuilds
+      - ./tools/bot_config.json:/app/tools/bot_config.json
+      - ./tools/member_activity.json:/app/tools/member_activity.json
+    depends_on:
+      android:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  android-data:
