@@ -1,16 +1,9 @@
-"""
-console_sink.py
-===============
-Loguru sink that forwards every DEBUG+ log record to a Discord webhook,
-preserving the full format: timestamp | level | module:function:line - message
-
-Lines are batched every 0.8 s into a single code-block message so Discord's
-rate limit (30 req/s, 2000 chars/msg) is never hit.
-
-Usage (add near the top of any tool script, after load_dotenv):
-    import console_sink
-    console_sink.setup("notice_board")      # shown as the webhook username
-"""
+# Loguru sink that forwards every DEBUG+ log record to a Discord webhook.
+# Lines are batched every 0.8 s to stay within Discord's rate limit.
+#
+# Usage:
+#   import console_sink
+#   console_sink.setup("notice_board")   # string shown as the webhook username
 from __future__ import annotations
 
 import json

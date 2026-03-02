@@ -1,10 +1,6 @@
-"""
-Shared runtime configuration for cocbot tools.
-===============================================
-All mutable settings live in bot_config.json (same directory).
-Discord /config commands write to this file; tool scripts read from it.
-Module-level constants in the individual scripts act as fallbacks only.
-"""
+# Shared runtime config for cocbot tools.
+# All mutable settings live in tools/bot_config.json.
+# Discord /config commands write to this file; tool scripts read from it.
 from __future__ import annotations
 
 import json
@@ -77,14 +73,7 @@ def get(key: str):
 
 
 def set_value(key: str, raw_value: str) -> tuple[bool, str]:
-    """
-    Parse raw_value into the correct type for key and persist.
-
-    Returns
-    -------
-    (True,  "success message")
-    (False, "error message")
-    """
+    """Parse raw_value into the correct type for key, persist, and return (ok, message)."""
     if key not in FIELD_META:
         known = ", ".join(f"`{k}`" for k in FIELD_META)
         return False, f"Unknown key `{key}`.  Known keys: {known}"

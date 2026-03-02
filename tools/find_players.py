@@ -1,20 +1,6 @@
-"""
-Tool helper: find_players.py
-============================
-Called from notice_board.py while a clan view is open (after "View Clan",
-before the back-arrow tap).
-
-Flow
-----
-1. Tap the clan tag text on screen  → device=(998, 306)
-2. Tap the Copy button that appears  → device=(1176, 314)
-3. Read the clipboard from the device via ADB (dumpsys clipboard).
-4. Fetch all clan members from the official CoC API.
-5. Filter members whose town hall AND monthly donations meet the thresholds
-   set in the FILTERS section below.
-6. Append matching player tags (e.g. "#RCC2RLLL") to:
-     tools/found_players.txt
-"""
+# Called from notice_board.py while a clan view is open.
+# Copies the clan tag via ADB clipboard, fetches members from the CoC API,
+# filters by TH level + donations, and appends matching tags to found_players.txt.
 
 from __future__ import annotations
 
@@ -37,13 +23,10 @@ from cocbot.api.client import CoCAPIClient
 from cocbot.config import settings
 import config_manager
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# FILTERS  —  defaults only; live values are read from bot_config.json
-# ═══════════════════════════════════════════════════════════════════════════════
-MIN_TH         = 14       # default minimum town hall level (inclusive)
-MAX_TH         = 18       # default maximum town hall level (inclusive)
-MIN_DONATIONS  = 1000     # default minimum monthly troops donated
-# ═══════════════════════════════════════════════════════════════════════════════
+# Defaults — live values are read from bot_config.json at runtime
+MIN_TH         = 14       # minimum town hall level (inclusive)
+MAX_TH         = 18       # maximum town hall level (inclusive)
+MIN_DONATIONS  = 1000     # minimum monthly troops donated
 
 # Output file — written to tools/found_players.txt
 OUTPUT_FILE = Path(__file__).parent / "found_players.txt"

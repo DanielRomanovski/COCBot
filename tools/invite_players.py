@@ -1,30 +1,7 @@
-"""
-Tool: invite_players.py
-=======================
-Reads player tags from found_players.txt and sends each one a clan invite.
-
-Flow
-----
-1. Press ESC ×4  → reach the main village screen.
-2. Press Profile button.
-3. Press Social tab.
-4. Press Search Players.
-5. For each tag in found_players.txt:
-     a. Tap the search input field.
-     b. Clear any existing text.
-     c. Type the player tag.
-     d. Tap Search.
-     e. Tap Invite.
-     f. Tap Back arrow.
-     g. Remove the tag from found_players.txt.
-6. When the file is empty: press ESC ×4, then either
-     – (standalone) launch notice_board.py and exit, or
-     – (library)    return so the caller can re-navigate.
-
-Run standalone
---------------
-  poetry run python tools/invite_players.py
-"""
+# Reads player tags from found_players.txt and sends each one a clan invite.
+# Navigates: ESC×4 → Profile → Social → Search Players → type tag → Invite.
+# Each tag is removed from found_players.txt after a successful invite.
+# Standalone: poetry run python tools/invite_players.py
 
 from __future__ import annotations
 

@@ -1,19 +1,14 @@
-"""
-ADB Device Manager
-==================
-Wraps `adbutils` to provide a clean interface for:
-- Connecting to the Android emulator over TCP
-- Taking screenshots → numpy arrays
-- Sending tap, swipe, long-press, and key events
-- Launching / force-stopping apps
-"""
+# ADB device controller — wraps adbutils to connect to the Android emulator
+# and send input events, take screenshots, and manage the CoC app.
 
 from __future__ import annotations
 
 import io
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -27,27 +22,37 @@ if TYPE_CHECKING:
 # Clash of Clans package name on Android
 COC_PACKAGE = "com.supercell.clashofclans"
 
+# Bundled ADB binary (Windows). Falls back to system adb on Linux/Docker.
+_BUNDLED_ADB = (
+    Path(__file__).resolve().parents[3]
+    / "platform-tools" / "platform-tools" / "adb.exe"
+)
+
+
+def _adb_bin() -> str:
+    """Return the path to the adb binary, preferring the bundled one on Windows."""
+    if _BUNDLED_ADB.exists():
+        return str(_BUNDLED_ADB)
+    found = shutil.which("adb")
+    if found:
+        return found
+    raise FileNotFoundError(
+        "adb not found — install Android platform-tools or add adb to PATH"
+    )
+
 
 @dataclass
 class DeviceConfig:
     host: str = "localhost"
     port: int = 5555
-    serial: str | None = None  # Explicit serial overrides host:port
-    width: int = 1080
-    height: int = 1920
+    serial: str | None = None  # explicit serial overrides host:port
+    width: int = 1920
+    height: int = 1080
     connect_timeout: int = 30  # seconds
 
 
 class ADBDevice:
-    """
-    High-level ADB device controller.
-
-    Usage
-    -----
-    async with ADBDevice(config) as dev:
-        screenshot = await dev.screenshot()
-        await dev.tap(540, 960)
-    """
+    """High-level ADB device controller. Use as a context manager or call connect() manually."""
 
     def __init__(self, config: DeviceConfig) -> None:
         self.config = config
@@ -57,7 +62,7 @@ class ADBDevice:
     # ── Connection ────────────────────────────────────────────────────────────
 
     def connect(self) -> None:
-        """Connect to the emulator via ADB-over-TCP and verify the connection."""
+        """Connect to the emulator via ADB-over-TCP and wait until the device is ready."""
         if self.config.serial:
             serial = self.config.serial
         else:
@@ -65,10 +70,9 @@ class ADBDevice:
 
         logger.info("Connecting to ADB device: {}", serial)
 
-        # Use absolute path to adb.exe
-        adb_path = r"E:\github projects\cocbot\platform-tools\platform-tools\adb.exe"
-        subprocess.run([adb_path, "kill-server"], capture_output=True)
-        subprocess.run([adb_path, "start-server"], capture_output=True)
+        adb = _adb_bin()
+        subprocess.run([adb, "kill-server"], capture_output=True)
+        subprocess.run([adb, "start-server"], capture_output=True)
         time.sleep(1.0)
 
         # Tell the local ADB server to connect to the remote emulator
@@ -105,13 +109,9 @@ class ADBDevice:
         return f"{self.config.host}:{self.config.port}"
 
     def _shell(self, cmd: str) -> str:
-        """
-        Run an adb shell command via the adb binary (subprocess).
-        This is more reliable than adbutils .shell() with BlueStacks.
-        """
-        adb_path = r"E:\github projects\cocbot\platform-tools\platform-tools\adb.exe"
+        """Run an adb shell command and return stdout."""
         result = subprocess.run(
-            [adb_path, "-s", self._serial, "shell", cmd],
+            [_adb_bin(), "-s", self._serial, "shell", cmd],
             capture_output=True,
             text=True,
         )
@@ -133,14 +133,7 @@ class ADBDevice:
     # ── Screenshot ────────────────────────────────────────────────────────────
 
     def screenshot(self) -> np.ndarray:
-        """
-        Capture the current screen.
-
-        Returns
-        -------
-        np.ndarray
-            BGR image array (OpenCV format), shape (height, width, 3)
-        """
+        """Return the current screen as a BGR numpy array (OpenCV format)."""
         raw = self.device.screenshot()  # newer adbutils returns PIL Image directly
         if isinstance(raw, Image.Image):
             img = raw.convert("RGB")
@@ -230,9 +223,9 @@ class ADBDevice:
     # ── Diagnostics ──────────────────────────────────────────────────────────
 
     def get_resolution(self) -> tuple[int, int]:
-        """Query actual screen resolution from the device."""
+        """Query the actual screen resolution from the device (e.g. 1920x1080)."""
         output = self._shell("wm size")
-        # Output: "Physical size: 1080x1920"
+        # Output: "Physical size: 1920x1080"
         try:
             size_part = output.split(":")[-1].strip()
             w, h = size_part.split("x")

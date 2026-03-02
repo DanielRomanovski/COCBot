@@ -1,29 +1,5 @@
-"""
-Tool: notice_board.py
-=====================
-Navigates to the Clan Notice Board, scrolls through it, and taps each clan.
-After tapping a clan, it hands off to filter_players() to process it.
-
-Path to Notice Board
---------------------
-  1. Tap the clan button  → device=(106, 78)
-  2. Tap the notice board → device=(1508, 120)
-
-Clan card layout (device coordinates)
---------------------------------------
-  SCROLL ONCE, then tap 6 clans:
-    (752,  390)  (1772,  390)
-    (774,  744)  (1738,  728)
-    (770, 1200)  (1788, 1220)
-
-  SCROLL THREE MORE TIMES (0.5s apart), then tap 4 clans:
-    (748,  452)  (1742,  466)
-    (774,  880)  (1774,  904)
-
-Run
----
-  poetry run python tools/notice_board.py
-"""
+# Navigates the Clan Notice Board, taps each clan card, and delegates to
+# find_players() to filter and queue player tags for inviting.
 
 from __future__ import annotations
 
@@ -44,11 +20,6 @@ from find_players import find_players, OUTPUT_FILE as PLAYERS_FILE
 from invite_players import invite_players, _go_to_main
 import config_manager
 
-# Invite threshold — now driven by bot_config.json (set via Discord /config invite_every)
-# Kept here only as fallback default.
-_INVITE_EVERY_DEFAULT = 100
-
-
 
 def _queued_players() -> int:
     """Return number of player tags currently waiting in found_players.txt."""
@@ -59,10 +30,6 @@ def _queued_players() -> int:
 
 PROFILE_BUTTON = (76, 62)
 CLANS_BUTTON = (1136, 90)
-SCROLL_X = 540  # middle of 1080-wide screen
-SCROLL_FROM_Y = 1600
-SCROLL_TO_Y = 400
-SCROLL_DURATION = 500
 
 CLAN_CHORDS = [
   (554, 310),  # Clan 1
@@ -82,44 +49,37 @@ CLAN7_10_CHORDS = [
 
 REFRESH_BUTTON = (980, 940)
 
-# ── Scroll settings ───────────────────────────────────────────────────────────
-# A swipe upward (finger moves up) scrolls the list down to reveal more clans.
-# The swipe goes from the bottom-centre to the top-centre of the screen.
-SCROLL_X          = 960    # horizontal centre (for 1920-wide screen)
-SCROLL_FROM_Y     = 1600   # start of swipe (bottom area)
-SCROLL_TO_Y       = 400    # end of swipe (top area)
-SCROLL_DURATION   = 500    # ms
+# Scroll: swipe upward (finger moves up) to reveal clans further down the list.
+SCROLL_X        = 960    # horizontal centre
+SCROLL_FROM_Y   = 1600   # swipe start (bottom)
+SCROLL_TO_Y     = 400    # swipe end (top)
+SCROLL_DURATION = 500    # ms
 
-# Delay between actions (seconds)
-DELAY_AFTER_TAP   = 1.5    # time to let a clan profile open
-DELAY_AFTER_SCROLL = 0.5   # pause between scrolls
-
-
+DELAY_AFTER_TAP    = 1.5  # seconds to wait after tapping a clan card
+DELAY_AFTER_SCROLL = 0.5  # pause between consecutive scrolls
 
 
 def drag_menu_down(device: ADBDevice):
-  # Hold at (960, 1016), drag to (962, 724)
-  device.swipe(960, 1016, 962, 724, 600)
-  time.sleep(1)
+    device.swipe(960, 1016, 962, 724, 600)
+    time.sleep(1)
+
 
 def drag_to_top(device: ADBDevice):
-  # Drag from (960, 1016) to (960, 0) to reach the top
-  device.swipe(960, 1016, 960, 0, 800)
-  time.sleep(1)
+    device.swipe(960, 1016, 960, 0, 800)
+    time.sleep(1)
+
 
 def fast_scroll_to_bottom(device: ADBDevice):
-    # 10 fast swipes to go to the bottom
     center_x = settings.emulator_width // 2
     for _ in range(10):
         device.swipe(center_x, SCROLL_FROM_Y, center_x, SCROLL_TO_Y, 200)
         time.sleep(0.2)
 
 
-
 def tap(device: ADBDevice, x: int, y: int, label: str):
-  logger.info(f"Tapping {label} at ({x}, {y})")
-  device.tap(x, y)
-  time.sleep(1)
+    logger.info("Tapping {} at ({}, {})", label, x, y)
+    device.tap(x, y)
+    time.sleep(1)
 
 
 def main() -> None:

@@ -1,27 +1,19 @@
 """
-Discord Bot for cocbot
-======================
+Discord bot for controlling and monitoring CoCBot.
+
 Commands:
   /leaderboard [filter]     – Clan activity table (worst → best)
   /invite start [moderate]  – Start the notice-board / invite loop  [admin]
   /invite stop              – Stop the invite loop  [admin]
-  /invite status            – Show whether the loop is running
-  /config [key] [value]     – View or change any runtime setting (set requires admin)
+  /invite status            – Loop state + current recruit filters
+  /config [key] [value]     – View or change a bot setting (set requires admin)
   /screenshot               – Post a screenshot of the emulator  [admin]
-  /forcemenu                – ESC ×7 + Cancel to reach main screen  [admin]
+  /forcemenu                – ESC ×7 + Cancel to reach the main screen  [admin]
   /help                     – Command reference
 
 Background task:
-  Every N hours (config: activity_check_interval_hours) the bot silently
-  refreshes the activity tracker without ADB — pure API.
-
-Setup:
-  Add to .env:
-    DISCORD_BOT_TOKEN=...
-    DISCORD_GUILD_ID=...
-    DISCORD_KICK_WEBHOOK=...  (optional — kick reports)
-  Run:
-    poetry run python tools/discord_bot.py
+  Every N hours (activity_check_interval_hours) the activity tracker is
+  refreshed silently via the CoC API with no ADB interaction.
 """
 from __future__ import annotations
 
@@ -64,10 +56,8 @@ class _InterceptHandler(logging.Handler):
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 logging.basicConfig(handlers=[_InterceptHandler()], level=logging.DEBUG, force=True)
-# Keep discord.py gateway/http noise at INFO to avoid flooding
 logging.getLogger("discord").setLevel(logging.INFO)
 logging.getLogger("discord.http").setLevel(logging.WARNING)
-# ─────────────────────────────────────────────────────────────────────────────
 
 import config_manager
 from config_manager import FIELD_META
@@ -83,7 +73,7 @@ GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0"))
 CLAN_NAME = "mariners"
 CLAN_MAX  = 50
 
-# ── Invite loop subprocess handle ─────────────────────────────────────────────
+
 _invite_proc: asyncio.subprocess.Process | None = None
 
 
@@ -91,7 +81,6 @@ async def _start_invite_loop(moderate: bool) -> str:
     global _invite_proc
     if _invite_proc is not None and _invite_proc.returncode is None:
         return f"⚠️ Already running (PID {_invite_proc.pid}). Use `/invite stop` first."
-    # Press ESC ×3 + Cancel to ensure we're at the main screen before starting.
     try:
         await _adb_esc_cancel(3)
     except Exception as exc:
@@ -119,7 +108,6 @@ async def _stop_invite_loop() -> str:
     except asyncio.TimeoutError:
         _invite_proc.kill()
     _invite_proc = None
-    # Press ESC ×3 + Cancel to return to main screen after the loop is killed.
     try:
         await _adb_esc_cancel(3)
     except Exception as exc:
@@ -153,7 +141,6 @@ _ADMIN_DENIED = "❌ This command requires **Administrator** or **Manage Guild**
 # ── ADB helpers (synchronous, run in executor) ────────────────────────────────
 
 def _make_device() -> ADBDevice:
-    """Create and connect an ADBDevice using the current settings."""
     device = ADBDevice(DeviceConfig(
         host=settings.adb_host,
         port=settings.adb_port,
@@ -165,24 +152,21 @@ def _make_device() -> ADBDevice:
 
 
 def _adb_esc_cancel_sync(times: int) -> None:
-    """Press Back *times* times then tap the Cancel button (blocking)."""
     device = _make_device()
     for _ in range(times):
         device.press_back()
         time.sleep(0.5)
     time.sleep(0.3)
-    device.tap(754, 698)  # Cancel button at display=(377, 349)
+    device.tap(754, 698)
     time.sleep(0.8)
 
 
 async def _adb_esc_cancel(times: int = 3) -> None:
-    """Async wrapper — runs _adb_esc_cancel_sync in a thread."""
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _adb_esc_cancel_sync, times)
 
 
 def _adb_screenshot_sync() -> bytes:
-    """Capture the emulator screen and return raw PNG bytes (blocking)."""
     device = _make_device()
     img = device.screenshot_pil()
     buf = io.BytesIO()

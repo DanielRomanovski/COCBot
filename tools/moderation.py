@@ -1,19 +1,9 @@
-"""
-Tool: moderation.py
-===================
-Scores all clan members via the CoC API (worst → best) then enters the
-in-game clan screen, scrolls to the very bottom, checks each bottom player's
-tag by copying it from the share sheet, then kicks the ones on the kick list.
-
-DRY_RUN toggle (top of file)
------------------------------
-  DRY_RUN = True   →  presses Cancel on the kick dialog (safe test mode)
-  DRY_RUN = False  →  presses Confirm (real kicks)
-
-Run standalone (assumes you are already on the main village screen)
--------------------------------------------------------------------
-  poetry run python tools/moderation.py
-"""
+# Scores clan members by inactivity via the CoC API (worst → best), then
+# navigates the in-game member list, copies each player's tag via the share
+# sheet, and kicks the configured number of worst eligible players.
+#
+# dry_run (config key) controls whether the kick dialog is confirmed or cancelled.
+# All thresholds are read live from bot_config.json via config_manager.
 
 from __future__ import annotations
 
@@ -50,8 +40,7 @@ PLAYERS_TO_KICK        = 2             # number of members to remove per run
 OFFLINE_THRESHOLD_DAYS = 7             # never kick anyone online within this many days
 DRY_RUN                = True          # True  = press Cancel (safe test mode)
                                        # False = press Confirm (real kicks)
-STEP_MODE              = True         # True  = pause and wait for Enter in terminal
-                                       #         before every tap (debug only)
+STEP_MODE              = False        # True = pause before every tap (debug only)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Coordinates ───────────────────────────────────────────────────────────────
@@ -147,7 +136,9 @@ def _press_back(device: ADBDevice, times: int = 1, delay: float = 0.5) -> None:
 
 
 def _read_clipboard() -> str | None:
-    """Read the Windows clipboard via PowerShell and extract a CoC player tag."""
+    """Read the host clipboard via PowerShell and extract a CoC player tag.
+    Windows-only: works because the emulator syncs its clipboard to the host.
+    """
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
         capture_output=True, text=True,
@@ -195,13 +186,8 @@ def _save_activity(data: dict) -> None:
 def _update_player_activity(activity: dict, tag: str, current_stats: dict) -> float | None:
     """
     Compare current_stats against the stored snapshot for tag.
-    If anything changed, update last_seen to now.
-
-    Returns
-    -------
-    float  – days since last_seen  (0.0 means active right now)
-    None   – player was never seen before, or last_seen is unknown
-             (caller should treat as "no activity data" and rank by donations only)
+    Updates last_seen if anything changed.
+    Returns days since last activity, or None if no baseline exists yet.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -359,10 +345,7 @@ def _log_rankings(ranked: list[MemberScore]) -> None:
 
 
 async def _post_kick_report(kicked: list[MemberScore]) -> None:
-    """
-    Post a moderation summary embed to the Discord webhook URL stored in
-    DISCORD_KICK_WEBHOOK.  Does nothing if the env var is not set.
-    """
+    """Post a moderation summary embed to DISCORD_KICK_WEBHOOK (if configured)."""
     webhook_url = os.getenv("DISCORD_KICK_WEBHOOK", "")
     if not webhook_url:
         return
