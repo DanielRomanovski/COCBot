@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -16,9 +17,16 @@ from loguru import logger
 
 from cocbot.adb.device import ADBDevice, DeviceConfig
 from cocbot.config import settings
-from find_players import find_players, get_queue, clear_queue
+from find_players import find_players, OUTPUT_FILE as PLAYERS_FILE
 from invite_players import invite_players, _go_to_main
 import config_manager
+
+
+def _queued_players() -> int:
+    """Return number of player tags currently waiting in found_players.txt."""
+    if not PLAYERS_FILE.exists():
+        return 0
+    return sum(1 for line in PLAYERS_FILE.read_text().splitlines() if line.strip())
 
 
 PROFILE_BUTTON = (52,  38)
@@ -47,8 +55,8 @@ DELAY_AFTER_TAP = 1.5
 
 
 def drag_menu_down(device: ADBDevice):
-    """Single swipe down to reveal clans 1-6."""
-    device.swipe(724, 668, 722, 426, 600)
+    """Single swipe down to reveal clans 1-6 (half-scroll)."""
+    device.swipe(724, 668, 722, 547, 600)
     time.sleep(1)
 
 
@@ -66,6 +74,42 @@ def tap(device: ADBDevice, x: int, y: int, label: str):
     time.sleep(1)
 
 
+def _ensure_clipboard_server(device: ADBDevice) -> None:
+    """Ensure clipboard HTTP server is running; restart via Termux if not."""
+    url = f"http://{settings.adb_host}:8765/clipboard"
+    try:
+        urllib.request.urlopen(url, timeout=3)
+        logger.info("Clipboard server online at {}", url)
+        return
+    except Exception:
+        logger.warning("Clipboard server offline — launching Termux to restart it")
+
+    device._shell("am start -n com.termux/.HomeActivity")
+    time.sleep(2)
+    device._shell("input keyevent 113")  # Ctrl+C to kill any running process
+    time.sleep(1)
+    device._shell("input text 'python ~/clipboard_server.py'")
+    device._shell("input keyevent 66")   # Enter
+
+    # Wait up to 20s for server to respond
+    for i in range(20):
+        time.sleep(1)
+        try:
+            urllib.request.urlopen(url, timeout=2)
+            logger.success("Clipboard server back online after {}s", i + 1)
+            break
+        except Exception:
+            pass
+    else:
+        logger.error("Clipboard server did not come up after 20s — continuing anyway")
+
+    # Relaunch CoC and wait for it to fully load
+    logger.info("Relaunching Clash of Clans...")
+    device._shell("am start -n com.supercell.clashofclans/com.supercell.clashofclans.GameApp")
+    time.sleep(20)  # slow phone — wait for full load
+    logger.info("CoC should be loaded now")
+
+
 def main() -> None:
     import console_sink
     console_sink.setup("notice_board")
@@ -77,22 +121,12 @@ def main() -> None:
     )
     device = ADBDevice(cfg)
 
-
     logger.info("Connecting to ADB at {}:{}", settings.adb_host, settings.adb_port)
     device.connect()
+    _ensure_clipboard_server(device)
 
     CLAN_STEPS = [(x, y, f"Clan {i+1}") for i, (x, y) in enumerate(CLAN_CHORDS)]
     CLAN7_10_STEPS = [(x, y, f"Clan {i+7}") for i, (x, y) in enumerate(CLAN7_10_CHORDS)]
-
-    def _queued() -> int:
-        return len(get_queue())
-
-    def _do_invite():
-        queue_snapshot = list(get_queue())
-        clear_queue()
-        invite_players(device, standalone=False, tags=queue_snapshot)
-        tap(device, *PROFILE_BUTTON, "Profile")
-        tap(device, *CLANS_BUTTON, "Clans")
 
     def process_clans(steps) -> int:
         """Tap each clan, call find_players, return total new players found."""
@@ -117,9 +151,11 @@ def main() -> None:
       process_clans(CLAN_STEPS)
 
       # Check after first batch
-      if _queued() >= config_manager.get("invite_every"):
-          logger.info("{} players queued — switching to invite mode", _queued())
-          _do_invite()
+      if _queued_players() >= config_manager.get("invite_every"):
+          logger.info("{} players queued — switching to invite mode", _queued_players())
+          invite_players(device, standalone=False)
+          tap(device, *PROFILE_BUTTON, "Profile")
+          tap(device, *CLANS_BUTTON, "Clans")
           continue
 
       # Drag back to the top to reach clans 7-10
@@ -130,12 +166,14 @@ def main() -> None:
 
       # Refresh loads a new set of clans
       tap(device, *REFRESH_BUTTON, "Refresh")
-      logger.info("Refresh complete — {} player(s) queued", _queued())
+      logger.info("Refresh complete — {} player(s) queued", _queued_players())
 
       # Check after second batch / refresh
-      if _queued() >= config_manager.get("invite_every"):
-          logger.info("{} players queued — switching to invite mode", _queued())
-          _do_invite()
+      if _queued_players() >= config_manager.get("invite_every"):
+          logger.info("{} players queued — switching to invite mode", _queued_players())
+          invite_players(device, standalone=False)
+          tap(device, *PROFILE_BUTTON, "Profile")
+          tap(device, *CLANS_BUTTON, "Clans")
 
 
 if __name__ == "__main__":
