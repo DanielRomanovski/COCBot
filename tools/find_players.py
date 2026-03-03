@@ -40,7 +40,7 @@ def _read_ui_tag(device: ADBDevice) -> str | None:
     """Read the CoC tag visible on screen via Android UI dump.
     Android XML-encodes '#' as '&#35;', so we match both forms.
     """
-    xml = device._shell("uiautomator dump /dev/tty 2>/dev/null")
+    xml = device._shell("uiautomator dump /sdcard/ui_dump.xml >/dev/null 2>&1 && cat /sdcard/ui_dump.xml")
     logger.debug("UI dump length: {} chars", len(xml))
     match = _TAG_RE_E.search(xml.upper())
     if match:
