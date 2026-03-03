@@ -65,6 +65,7 @@ from config_manager import FIELD_META
 from moderation import _fetch_ranked_members, MemberScore  # noqa: E402
 from cocbot.adb.device import ADBDevice, DeviceConfig
 from cocbot.config import settings
+from coords import sc, CANCEL_BUTTON
 
 # ── Env config ────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,13 @@ CLAN_MAX  = 50
 _ADB_TARGETS: dict[str, tuple[str, int]] = {
     "phone":      ("10.0.0.47",  5555),   # physical Android phone over WiFi
     "bluestacks": ("10.0.0.156", 5556),   # Windows BlueStacks (LAN IP of Windows PC)
+}
+
+_show_touches_enabled: bool = False  # tracks show_touches state for /showinputs
+
+_RESOLUTIONS: dict[str, tuple[int, int]] = {
+    "1920x1080": (1920, 1080),
+    "1440x720":  (1440,  720),
 }
 
 
@@ -164,7 +172,7 @@ def _adb_esc_cancel_sync(times: int) -> None:
         device.press_back()
         time.sleep(0.5)
     time.sleep(0.3)
-    device.tap(754, 698)
+    device.tap(*CANCEL_BUTTON)
     time.sleep(0.8)
 
 
@@ -180,6 +188,27 @@ def _adb_screenshot_sync() -> bytes:
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf.getvalue()
+
+
+# ── Env helpers ───────────────────────────────────────────────────────────────
+
+def _write_env_kv(key: str, value: str) -> None:
+    """Update or append KEY=value in .env (written by /resolution so subprocesses pick it up)."""
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        env_path.write_text(f"{key}={value}\n", encoding="utf-8")
+        return
+    lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    prefix = key.upper() + "="
+    updated = False
+    for i, line in enumerate(lines):
+        if line.upper().startswith(prefix):
+            lines[i] = f"{key}={value}\n"
+            updated = True
+            break
+    if not updated:
+        lines.append(f"{key}={value}\n")
+    env_path.write_text("".join(lines), encoding="utf-8")
 
 
 # ── Embed helpers ─────────────────────────────────────────────────────────────
@@ -447,6 +476,93 @@ async def forcemenu_cmd(interaction: discord.Interaction) -> None:
         return
     await interaction.followup.send("✅ Pressed ESC ×7 + Cancel — should be on the main screen now.")
 
+# ── /showinputs ───────────────────────────────────────────────────────────────
+
+@client.tree.command(name="showinputs", description="[Admin] Toggle tap-dot overlay on the device screen (BlueStacks only)")
+@app_commands.describe(state="on = show red dots for every tap, off = hide them")
+@app_commands.choices(state=[
+    app_commands.Choice(name="on",  value="on"),
+    app_commands.Choice(name="off", value="off"),
+])
+async def showinputs_cmd(interaction: discord.Interaction, state: str = "") -> None:
+    global _show_touches_enabled
+    if not _is_admin(interaction):
+        await interaction.response.send_message(_ADMIN_DENIED, ephemeral=True)
+        return
+
+    bs_host, bs_port = _ADB_TARGETS["bluestacks"]
+    if settings.adb_host != bs_host or settings.adb_port != bs_port:
+        await interaction.response.send_message(
+            "⚠️ `/showinputs` only works when BlueStacks is the active ADB target.\n"
+            f"Use `/adbtarget bluestacks` first (current: `{settings.adb_host}:{settings.adb_port}`).",
+            ephemeral=True,
+        )
+        return
+
+    # Determine target state
+    if state == "on":
+        new_state = True
+    elif state == "off":
+        new_state = False
+    else:
+        new_state = not _show_touches_enabled   # toggle if no arg
+
+    value = "1" if new_state else "0"
+    await interaction.response.defer()
+    try:
+        loop = asyncio.get_event_loop()
+        device = await loop.run_in_executor(None, _make_device)
+        await loop.run_in_executor(
+            None,
+            lambda: device._shell(f"settings put system show_touches {value}"),
+        )
+        _show_touches_enabled = new_state
+        label = "🔴 ON — red dots will appear on every tap" if new_state else "⚫ OFF — tap dots hidden"
+        # Post a screenshot so they can see it immediately
+        try:
+            png = await loop.run_in_executor(None, _adb_screenshot_sync)
+            file = discord.File(io.BytesIO(png), filename="screen.png")
+            await interaction.followup.send(f"👆 Show touches: **{label}**", file=file)
+        except Exception:
+            await interaction.followup.send(f"👆 Show touches: **{label}**")
+    except Exception as exc:
+        await interaction.followup.send(f"❌ ADB error: {exc}")
+
+
+# ── /resolution ───────────────────────────────────────────────────────────────
+
+@client.tree.command(name="resolution", description="[Admin] Switch coordinate space between resolutions")
+@app_commands.describe(res="Resolution preset to activate")
+@app_commands.choices(res=[
+    app_commands.Choice(name="1920x1080  (original MuMu / phone override)", value="1920x1080"),
+    app_commands.Choice(name="1440x720   (BlueStacks default)",             value="1440x720"),
+])
+async def resolution_cmd(interaction: discord.Interaction, res: str = "") -> None:
+    if not _is_admin(interaction):
+        await interaction.response.send_message(_ADMIN_DENIED, ephemeral=True)
+        return
+
+    if not res:
+        current = f"{settings.emulator_width}x{settings.emulator_height}"
+        lines = [f"**Current resolution:** `{current}`  (coordinate baseline)", ""]
+        for name in _RESOLUTIONS:
+            marker = " ◀ active" if name == current else ""
+            lines.append(f"• `{name}`{marker}")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        return
+
+    w, h = _RESOLUTIONS[res]
+    settings.emulator_width  = w   # type: ignore[misc]
+    settings.emulator_height = h   # type: ignore[misc]
+    _write_env_kv("EMULATOR_WIDTH",  str(w))
+    _write_env_kv("EMULATOR_HEIGHT", str(h))
+    logger.info("[resolution] Switched to {} ({}×{})", res, w, h)
+    await interaction.response.send_message(
+        f"✅ Resolution set to **{res}**\n"
+        f"• In-memory updated — `/screenshot`, `/forcemenu` use new coords immediately.\n"
+        f"• `.env` updated — next subprocess run (invite loop, moderation) uses new coords.\n"
+        f"⚠️ `coords.py` constants in imported modules won't reload until the bot restarts."
+    )
 
 # ── /help ─────────────────────────────────────────────────────────────────────
 
