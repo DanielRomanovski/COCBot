@@ -15,5 +15,6 @@ services:
     volumes:
       - ./tools/bot_config.json:/app/tools/bot_config.json
       - ./tools/member_activity.json:/app/tools/member_activity.json
+      - /root/.android:/root/.android   # persist ADB keys so phone stays authorized
     network_mode: host   # reach the phone over LAN without port mapping
     restart: unless-stopped
