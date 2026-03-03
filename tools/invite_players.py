@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from loguru import logger
@@ -32,6 +32,30 @@ BACK_ARROW      = ( 250,  62)
 # ── File ──────────────────────────────────────────────────────────────────────
 PLAYERS_FILE = Path(__file__).parent / "found_players.txt"
 
+# Clipboard HTTP bridge — clipboard_server.py on Windows (BlueStacks)
+#                       — Termux clipboard server on Android phone
+_CLIPBOARD_SERVER = f"http://{settings.adb_host}:8765/clipboard"
+
+
+def _clipboard_set(text: str) -> None:
+    """Push text to the clipboard server so we can paste it via ADB keyevent."""
+    try:
+        body = text.encode("utf-8")
+        req = urllib.request.Request(
+            _CLIPBOARD_SERVER, data=body, method="POST",
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+        )
+        urllib.request.urlopen(req, timeout=3)
+        logger.debug("Clipboard set via HTTP: {}", text)
+    except Exception as exc:
+        logger.warning("Clipboard server unreachable, falling back to input text ({})", exc)
+        # Fallback: direct input text (works on BlueStacks, may drop '#' on phones)
+        safe = text.replace("'", "")
+        import subprocess
+        subprocess.run(
+            ["adb", "-s", f"{settings.adb_host}:{settings.adb_port}", "shell", f"input text '{safe}'"],
+            capture_output=True,
+        )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -84,9 +108,10 @@ def _invite_one(device: ADBDevice, tag: str) -> None:
     device._shell("input keyevent KEYCODE_MOVE_END " + " ".join(["KEYCODE_DEL"] * 20))
     time.sleep(0.3)
 
-    # Type the tag — wrap in single quotes so the Android shell preserves '#'
-    safe_tag = tag.replace("'", "")           # strip any stray quotes
-    device._shell(f"input text '{safe_tag}'")
+    # Put tag in clipboard via HTTP bridge, then paste — avoids '#' shell escaping issues
+    _clipboard_set(tag)
+    time.sleep(0.2)
+    device._shell("input keyevent KEYCODE_PASTE")
     time.sleep(0.5)
 
     _tap(device, *SEARCH_BUTTON, "Search", delay=1.5)
@@ -94,20 +119,18 @@ def _invite_one(device: ADBDevice, tag: str) -> None:
     _tap(device, *BACK_ARROW,   "Back",    delay=0.8)
 
 
-def invite_players(device: ADBDevice, standalone: bool = False, tags: list[str] | None = None) -> None:
+def invite_players(device: ADBDevice, standalone: bool = False) -> None:
     """
-    Invite all players in the given tag list (or from found_players.txt if no list given).
+    Invite all players listed in found_players.txt.
 
     Parameters
     ----------
     device     : connected ADBDevice
     standalone : if True, launches notice_board.py via subprocess when done
-    tags       : in-memory list of player tags; falls back to file if None
     """
-    if tags is None:
-        tags = _read_tags()
+    tags = _read_tags()
     if not tags:
-        logger.info("No players queued — nothing to invite")
+        logger.info("found_players.txt is empty — nothing to invite")
         _go_to_main(device)
         if standalone:
             _relaunch_notice_board()
@@ -127,7 +150,10 @@ def invite_players(device: ADBDevice, standalone: bool = False, tags: list[str] 
             _invite_one(device, tag)
         except Exception as exc:
             logger.error("Failed to invite {}: {}", tag, exc)
-        # No file removal needed — caller clears the in-memory queue
+        finally:
+            # Always remove from file whether invite succeeded or not,
+            # to avoid retrying a bad tag forever
+            _remove_tag(tag)
 
     logger.success("All invites sent.")
 

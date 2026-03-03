@@ -38,6 +38,26 @@ class ClipboardHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        if self.path == "/clipboard":
+            length = int(self.headers.get("Content-Length", 0))
+            text = self.rfile.read(length).decode("utf-8")
+            try:
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+                win32clipboard.CloseClipboard()
+                self.send_response(200)
+            except Exception:
+                try:
+                    win32clipboard.CloseClipboard()
+                except Exception:
+                    pass
+                self.send_response(500)
+        else:
+            self.send_response(404)
+        self.end_headers()
+
     def log_message(self, format, *args):
         pass  # silence request logs
 
