@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import re
 import sys
-import time
 from pathlib import Path
 
 from loguru import logger
@@ -30,38 +29,31 @@ MIN_DONATIONS  = 1000     # minimum monthly troops donated
 # Output file — written to tools/found_players.txt
 OUTPUT_FILE = Path(__file__).parent / "found_players.txt"
 
-# Coordinates on the clan view screen (1440x720)
-TAP_TAG_COORD  = (748, 204)   # tap the clan tag text to select it
-TAP_COPY_COORD = (864, 210)   # tap the Copy button that pops up
-
-# Regex to find a CoC tag anywhere in a string (e.g. "#2CLOPC8PO")
-_TAG_RE = re.compile(r"#([A-Z0-9]{4,12})")
+# CoC tags start with #; Android XML-encodes # as &#35; so handle both forms
+_TAG_RE   = re.compile(r"#([A-Z0-9]{4,12})")
+_TAG_RE_E = re.compile(r"(?:#|&#35;|&#x23;)([A-Z0-9]{4,12})")
 
 
 # ── Tag reading ───────────────────────────────────────────────────────────────
 
 def _read_ui_tag(device: ADBDevice) -> str | None:
-    """Read the CoC tag visible on screen using Android UI dump (no PowerShell)."""
+    """Read the CoC tag visible on screen via Android UI dump.
+    Android XML-encodes '#' as '&#35;', so we match both forms.
+    """
     xml = device._shell("uiautomator dump /dev/tty 2>/dev/null")
-    match = _TAG_RE.search(xml.upper())
+    logger.debug("UI dump length: {} chars", len(xml))
+    match = _TAG_RE_E.search(xml.upper())
     if match:
         tag = f"#{match.group(1)}"
         logger.info("UI tag: {}", tag)
         return tag
-    logger.warning("No CoC tag found in UI dump")
+    logger.warning("No CoC tag found in UI dump (len={})", len(xml))
     return None
 
 
 def _get_clan_tag(device: ADBDevice) -> str | None:
-    """Tap the copy button on the clan page, then read the tag from the UI."""
-    logger.info("Tapping clan tag text at {}", TAP_TAG_COORD)
-    device.tap(*TAP_TAG_COORD)
-    time.sleep(0.8)
-
-    logger.info("Tapping Copy button at {}", TAP_COPY_COORD)
-    device.tap(*TAP_COPY_COORD)
-    time.sleep(0.8)
-
+    """Read the clan tag from the visible UI — no clipboard needed."""
+    # The tag is already displayed on the clan view screen; just dump the UI.
     return _read_ui_tag(device)
 
 

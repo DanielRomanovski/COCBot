@@ -65,8 +65,9 @@ BOTTOM_ROWS = [
     ((634, 218), (864, 102), (856, 332)),  # 5
 ]
 
-# Regex to find a CoC tag in clipboard text
-_TAG_RE = re.compile(r"#([A-Z0-9]{4,12})")
+# CoC tags start with #; Android XML-encodes # as &#35; so handle both forms
+_TAG_RE   = re.compile(r"#([A-Z0-9]{4,12})")
+_TAG_RE_E = re.compile(r"(?:#|&#35;|&#x23;)([A-Z0-9]{4,12})")
 
 # Activity snapshot file — persists between runs to measure last-seen
 ACTIVITY_FILE = Path(__file__).parent / "member_activity.json"
@@ -136,14 +137,17 @@ def _press_back(device: ADBDevice, times: int = 1, delay: float = 0.5) -> None:
 
 
 def _read_ui_tag(device: ADBDevice) -> str | None:
-    """Read the CoC tag visible on screen using Android UI dump (no PowerShell)."""
+    """Read the CoC tag visible on screen via Android UI dump.
+    Android XML-encodes '#' as '&#35;', so we match both forms.
+    """
     xml = device._shell("uiautomator dump /dev/tty 2>/dev/null")
-    match = _TAG_RE.search(xml.upper())
+    logger.debug("UI dump length: {} chars", len(xml))
+    match = _TAG_RE_E.search(xml.upper())
     if match:
         tag = f"#{match.group(1)}"
         logger.info("UI tag: {}", tag)
         return tag
-    logger.warning("No CoC tag found in UI dump")
+    logger.warning("No CoC tag found in UI dump (len={})", len(xml))
     return None
 
 
