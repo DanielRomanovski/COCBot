@@ -91,7 +91,7 @@ def _read_clipboard_via_termux_foreground(device: ADBDevice) -> str | None:
     """
     logger.debug("Bringing Termux to foreground so it can read clipboard")
     device._shell("am start -n com.termux/.HomeActivity")
-    time.sleep(2.0)  # wait for Termux to become focused
+    time.sleep(1.5)  # wait for Termux to become focused
 
     tag = _read_http_clipboard()
     if tag:
@@ -99,11 +99,10 @@ def _read_clipboard_via_termux_foreground(device: ADBDevice) -> str | None:
     else:
         logger.warning("Termux foreground clipboard read also returned nothing")
 
-    # Switch back to CoC immediately
-    device._shell(
-        "am start -n com.supercell.clashofclans/com.supercell.clashofclans.GameApp"
-    )
-    time.sleep(3.0)  # give CoC time to restore its foreground state
+    # Switch back to CoC using monkey launcher — most reliable on all Android versions
+    logger.debug("Switching back to CoC")
+    device.launch_coc()
+    time.sleep(2.5)  # give CoC time to restore its foreground state
     return tag
 
 
