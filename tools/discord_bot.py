@@ -117,6 +117,15 @@ async def _start_invite_loop(moderate: bool) -> str:
     except Exception as exc:
         return f"❌ ADB navigation failed: {exc}"
     config_manager.set_value("moderate_on_invite", "true" if moderate else "false")
+    # Build env that reflects the CURRENT in-memory settings so the subprocess
+    # always uses whatever /adbtarget and /resolution were last set to, not the
+    # stale values inherited from os.environ (which come from the original .env
+    # at container start and are not updated when settings mutates in-memory).
+    sub_env = dict(os.environ)
+    sub_env["adb_host"]       = settings.adb_host
+    sub_env["adb_port"]       = str(settings.adb_port)
+    sub_env["EMULATOR_WIDTH"]  = str(settings.emulator_width)
+    sub_env["EMULATOR_HEIGHT"] = str(settings.emulator_height)
     log_fh = open(_INVITE_LOG_FILE, "w")  # noqa: SIM115
     _invite_proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -124,6 +133,7 @@ async def _start_invite_loop(moderate: bool) -> str:
         cwd=str(ROOT),
         stdout=log_fh,
         stderr=log_fh,
+        env=sub_env,
     )
     # Give it a brief window to detect an immediate import/startup crash
     await asyncio.sleep(2.5)
