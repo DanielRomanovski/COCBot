@@ -28,18 +28,8 @@ MIN_TH         = 14       # minimum town hall level (inclusive)
 MAX_TH         = 18       # maximum town hall level (inclusive)
 MIN_DONATIONS  = 1000     # minimum monthly troops donated
 
-# In-memory queue — no file I/O needed
-_player_queue: list[str] = []
-
-
-def get_queue() -> list[str]:
-    """Return the current in-memory player tag queue."""
-    return _player_queue
-
-
-def clear_queue() -> None:
-    """Clear the in-memory queue after inviting."""
-    _player_queue.clear()
+# Output file — written to tools/found_players.txt
+OUTPUT_FILE = Path(__file__).parent / "found_players.txt"
 
 # CoC tags start with #; Android XML-encodes # as &#35; so handle both forms
 _TAG_RE   = re.compile(r"#([A-Z0-9]{4,12})")
@@ -176,9 +166,13 @@ def find_players(device: ADBDevice) -> int:
         logger.info("No matching players in {}", clan_tag)
         return 0
 
-    _player_queue.extend(matches)
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_FILE.open("a") as fh:
+        for tag in matches:
+            fh.write(tag + "\n")
+
     logger.success(
-        "Queued {} player(s) from {} (total queued: {})",
-        len(matches), clan_tag, len(_player_queue),
+        "Saved {} player(s) from {} → {}",
+        len(matches), clan_tag, OUTPUT_FILE,
     )
     return len(matches)
