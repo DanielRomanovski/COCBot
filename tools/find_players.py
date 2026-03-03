@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -39,38 +38,31 @@ TAP_COPY_COORD = (864, 210)   # tap the Copy button that pops up
 _TAG_RE = re.compile(r"#([A-Z0-9]{4,12})")
 
 
-# ── Clipboard ─────────────────────────────────────────────────────────────────
+# ── Tag reading ───────────────────────────────────────────────────────────────
 
-def _read_clipboard() -> str | None:
-    """Read the Windows clipboard via PowerShell Get-Clipboard."""
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
-        capture_output=True, text=True,
-    )
-    text = result.stdout.strip().upper()
-    logger.debug("Windows clipboard: {}", text)
-
-    match = _TAG_RE.search(text)
+def _read_ui_tag(device: ADBDevice) -> str | None:
+    """Read the CoC tag visible on screen using Android UI dump (no PowerShell)."""
+    xml = device._shell("uiautomator dump /dev/tty 2>/dev/null")
+    match = _TAG_RE.search(xml.upper())
     if match:
         tag = f"#{match.group(1)}"
-        logger.info("Clipboard clan tag: {}", tag)
+        logger.info("UI tag: {}", tag)
         return tag
-
-    logger.warning("Clipboard had no clan tag: {}", text)
+    logger.warning("No CoC tag found in UI dump")
     return None
 
 
 def _get_clan_tag(device: ADBDevice) -> str | None:
-    """Tap the copy button on the clan page, then read the clipboard."""
+    """Tap the copy button on the clan page, then read the tag from the UI."""
     logger.info("Tapping clan tag text at {}", TAP_TAG_COORD)
     device.tap(*TAP_TAG_COORD)
     time.sleep(0.8)
 
     logger.info("Tapping Copy button at {}", TAP_COPY_COORD)
     device.tap(*TAP_COPY_COORD)
-    time.sleep(0.5)
+    time.sleep(0.8)
 
-    return _read_clipboard()
+    return _read_ui_tag(device)
 
 
 # ── API fetch & filter ────────────────────────────────────────────────────────

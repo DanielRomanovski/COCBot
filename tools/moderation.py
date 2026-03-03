@@ -11,7 +11,6 @@ import asyncio
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -136,22 +135,15 @@ def _press_back(device: ADBDevice, times: int = 1, delay: float = 0.5) -> None:
         time.sleep(delay)
 
 
-def _read_clipboard() -> str | None:
-    """Read the host clipboard via PowerShell and extract a CoC player tag.
-    Windows-only: works because the emulator syncs its clipboard to the host.
-    """
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
-        capture_output=True, text=True,
-    )
-    text = result.stdout.strip().upper()
-    logger.debug("Clipboard content: {}", text)
-    match = _TAG_RE.search(text)
+def _read_ui_tag(device: ADBDevice) -> str | None:
+    """Read the CoC tag visible on screen using Android UI dump (no PowerShell)."""
+    xml = device._shell("uiautomator dump /dev/tty 2>/dev/null")
+    match = _TAG_RE.search(xml.upper())
     if match:
         tag = f"#{match.group(1)}"
-        logger.info("Read tag from clipboard: {}", tag)
+        logger.info("UI tag: {}", tag)
         return tag
-    logger.warning("No CoC tag found in clipboard: {}", text)
+    logger.warning("No CoC tag found in UI dump")
     return None
 
 
@@ -408,9 +400,9 @@ def _get_tag_at_row(device: ADBDevice, row_index: int) -> str | None:
     _tap(device, *player_coord,  f"Player row {row_index}",          delay=0.8)
     _tap(device, *profile_coord, f"Profile btn row {row_index}",     delay=1.2)
     _tap(device, *SHARE_ICON,    "Share icon",                       delay=0.8)
-    _tap(device, *COPY_TAG_BTN,  "Copy player tag",                  delay=0.5)
+    _tap(device, *COPY_TAG_BTN,  "Copy player tag",                  delay=0.8)
 
-    tag = _read_clipboard()
+    tag = _read_ui_tag(device)
 
     # Back to the member list (closes share sheet and profile)
     _tap(device, *BACK_ARROW, "Back arrow", delay=0.8)
