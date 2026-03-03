@@ -142,7 +142,13 @@ def _read_ui_tag(device: ADBDevice) -> str | None:
     """
     xml = device._shell("uiautomator dump /sdcard/ui_dump.xml >/dev/null 2>&1 && cat /sdcard/ui_dump.xml")
     logger.debug("UI dump length: {} chars", len(xml))
-    match = _TAG_RE_E.search(xml.upper())
+    upper = xml.upper()
+    idx = next((i for i in range(len(upper)) if upper[i:i+1] == '#' or upper[i:i+3] == '&#3'), -1)
+    if idx >= 0:
+        logger.debug("XML snippet near '#': ...{}...", repr(xml[max(0,idx-10):idx+30]))
+    else:
+        logger.debug("XML first 200 chars: {}", repr(xml[:200]))
+    match = _TAG_RE_E.search(upper)
     if match:
         tag = f"#{match.group(1)}"
         logger.info("UI tag: {}", tag)
