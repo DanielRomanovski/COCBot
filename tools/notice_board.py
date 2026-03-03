@@ -28,52 +28,43 @@ def _queued_players() -> int:
     return sum(1 for line in PLAYERS_FILE.read_text().splitlines() if line.strip())
 
 
-PROFILE_BUTTON = (76, 62)
-CLANS_BUTTON = (1136, 90)
+PROFILE_BUTTON = (52,  38)
+CLANS_BUTTON   = (838,  54)
+REFRESH_BUTTON = (738, 630)
+VIEW_CLAN      = (628, 570)
+BACK_ARROW     = (250,  62)
 
 CLAN_CHORDS = [
-  (554, 310),  # Clan 1
-  (1322, 306), # Clan 2
-  (584, 572),  # Clan 3
-  (1328, 560), # Clan 4
-  (578, 906),  # Clan 5
-  (1318, 888), # Clan 6
+    (474, 214),  # Clan 1
+    (970, 210),  # Clan 2
+    (440, 396),  # Clan 3
+    (966, 386),  # Clan 4
+    (434, 612),  # Clan 5
+    (976, 614),  # Clan 6
 ]
 
 CLAN7_10_CHORDS = [
-  (606, 356),  # Clan 7
-  (1316, 342), # Clan 8
-  (594, 686),  # Clan 9
-  (1336, 670), # Clan 10
+    (466, 220),  # Clan 7
+    (972, 236),  # Clan 8
+    (482, 444),  # Clan 9
+    (992, 448),  # Clan 10
 ]
 
-REFRESH_BUTTON = (980, 940)
-
-# Scroll: swipe upward (finger moves up) to reveal clans further down the list.
-SCROLL_X        = 960    # horizontal centre
-SCROLL_FROM_Y   = 1600   # swipe start (bottom)
-SCROLL_TO_Y     = 400    # swipe end (top)
-SCROLL_DURATION = 500    # ms
-
-DELAY_AFTER_TAP    = 1.5  # seconds to wait after tapping a clan card
-DELAY_AFTER_SCROLL = 0.5  # pause between consecutive scrolls
+DELAY_AFTER_TAP = 1.5
 
 
 def drag_menu_down(device: ADBDevice):
-    device.swipe(960, 1016, 962, 724, 600)
+    """Single swipe down to reveal clans 1-6."""
+    device.swipe(724, 668, 722, 426, 600)
     time.sleep(1)
 
 
 def drag_to_top(device: ADBDevice):
-    device.swipe(960, 1016, 960, 0, 800)
-    time.sleep(1)
-
-
-def fast_scroll_to_bottom(device: ADBDevice):
-    center_x = settings.emulator_width // 2
-    for _ in range(10):
-        device.swipe(center_x, SCROLL_FROM_Y, center_x, SCROLL_TO_Y, 200)
-        time.sleep(0.2)
+    """Swipe 3× to scroll down far enough to reach clans 7-10."""
+    for _ in range(3):
+        device.swipe(724, 668, 722, 426, 800)
+        time.sleep(0.5)
+    time.sleep(0.5)
 
 
 def tap(device: ADBDevice, x: int, y: int, label: str):
@@ -97,24 +88,8 @@ def main() -> None:
     logger.info("Connecting to ADB at {}:{}", settings.adb_host, settings.adb_port)
     device.connect()
 
-    CLAN_STEPS = [
-      (554, 310,  "Clan 1"),
-      (1322, 306, "Clan 2"),
-      (584, 572,  "Clan 3"),
-      (1328, 560, "Clan 4"),
-      (578, 906,  "Clan 5"),
-      (1318, 888, "Clan 6"),
-    ]
-
-    CLAN7_10_STEPS = [
-      (606, 356,  "Clan 7"),
-      (1316, 342, "Clan 8"),
-      (594, 686,  "Clan 9"),
-      (1336, 670, "Clan 10"),
-    ]
-
-    VIEW_CLAN   = (800, 868)
-    BACK_ARROW  = (268, 78)
+    CLAN_STEPS = [(x, y, f"Clan {i+1}") for i, (x, y) in enumerate(CLAN_CHORDS)]
+    CLAN7_10_STEPS = [(x, y, f"Clan {i+7}") for i, (x, y) in enumerate(CLAN7_10_CHORDS)]
 
     def process_clans(steps) -> int:
         """Tap each clan, call find_players, return total new players found."""
@@ -125,6 +100,7 @@ def main() -> None:
             total += find_players(device)
             tap(device, *BACK_ARROW, "Go Back to Clan Search")
         return total
+
 
     # Navigate to the clan search page once
     tap(device, *PROFILE_BUTTON, "Profile")

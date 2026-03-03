@@ -20,14 +20,14 @@ load_dotenv()
 from cocbot.adb.device import ADBDevice, DeviceConfig
 from cocbot.config import settings
 
-# ── Coordinates ───────────────────────────────────────────────────────────────
-PROFILE_BUTTON  = (76,   62)
-SOCIAL_TAB      = (1464, 82)
-SEARCH_PLAYERS  = (1478, 200)
-SEARCH_INPUT    = (612,  306)
-SEARCH_BUTTON   = (1318, 302)
-INVITE_BUTTON   = (696,  564)
-BACK_ARROW      = (266,  78)
+# ── Coordinates (1440x720) ────────────────────────────────────────────────────
+PROFILE_BUTTON  = ( 52,  38)
+SOCIAL_TAB      = (1058,  62)
+SEARCH_PLAYERS  = (1048, 138)
+SEARCH_INPUT    = ( 634, 208)
+SEARCH_BUTTON   = ( 970, 200)
+INVITE_BUTTON   = ( 536, 374)
+BACK_ARROW      = ( 250,  62)
 
 # ── File ──────────────────────────────────────────────────────────────────────
 PLAYERS_FILE = Path(__file__).parent / "found_players.txt"
@@ -155,7 +155,7 @@ def invite_players(device: ADBDevice, standalone: bool = False) -> None:
 
 
 # Cancel button (dismisses any open dialog / "leave game" prompt after excess ESC presses)
-_CANCEL_BTN = (754, 698)
+_CANCEL_BTN = (572, 464)
 
 
 def _go_to_main(device: ADBDevice) -> None:

@@ -86,10 +86,6 @@ _show_touches_enabled: bool = False  # tracks show_touches state for /showinputs
 _screenshot_feed_task: asyncio.Task | None = None
 _SCREENSHOT_FEED_CHANNEL_ID = 1478282184577257604
 
-_RESOLUTIONS: dict[str, tuple[int, int]] = {
-    "1920x1080": (1920, 1080),
-    "1440x720":  (1440,  720),
-}
 
 
 _invite_proc: asyncio.subprocess.Process | None = None
@@ -124,8 +120,8 @@ async def _start_invite_loop(moderate: bool) -> str:
     sub_env = dict(os.environ)
     sub_env["adb_host"]       = settings.adb_host
     sub_env["adb_port"]       = str(settings.adb_port)
-    sub_env["EMULATOR_WIDTH"]  = str(settings.emulator_width)
-    sub_env["EMULATOR_HEIGHT"] = str(settings.emulator_height)
+    sub_env["EMULATOR_WIDTH"]  = "1440"
+    sub_env["EMULATOR_HEIGHT"] = "720"
     log_fh = open(_INVITE_LOG_FILE, "w")  # noqa: SIM115
     _invite_proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -616,41 +612,6 @@ async def showinputs_cmd(interaction: discord.Interaction, state: str = "") -> N
         # _show_touches_enabled=False makes the loop exit on next iteration
         await interaction.followup.send("⚫ Tap dots **OFF** — feed stopping.")
 
-
-# ── /resolution ───────────────────────────────────────────────────────────────
-
-@client.tree.command(name="resolution", description="[Admin] Switch coordinate space between resolutions")
-@app_commands.describe(res="Resolution preset to activate")
-@app_commands.choices(res=[
-    app_commands.Choice(name="1920x1080  (original MuMu / phone override)", value="1920x1080"),
-    app_commands.Choice(name="1440x720   (BlueStacks default)",             value="1440x720"),
-])
-async def resolution_cmd(interaction: discord.Interaction, res: str = "") -> None:
-    if not _is_admin(interaction):
-        await interaction.response.send_message(_ADMIN_DENIED, ephemeral=True)
-        return
-
-    if not res:
-        current = f"{settings.emulator_width}x{settings.emulator_height}"
-        lines = [f"**Current resolution:** `{current}`  (coordinate baseline)", ""]
-        for name in _RESOLUTIONS:
-            marker = " ◀ active" if name == current else ""
-            lines.append(f"• `{name}`{marker}")
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
-        return
-
-    w, h = _RESOLUTIONS[res]
-    settings.emulator_width  = w   # type: ignore[misc]
-    settings.emulator_height = h   # type: ignore[misc]
-    _write_env_kv("EMULATOR_WIDTH",  str(w))
-    _write_env_kv("EMULATOR_HEIGHT", str(h))
-    logger.info("[resolution] Switched to {} ({}×{})", res, w, h)
-    await interaction.response.send_message(
-        f"✅ Resolution set to **{res}**\n"
-        f"• In-memory updated — `/screenshot`, `/forcemenu` use new coords immediately.\n"
-        f"• `.env` updated — next subprocess run (invite loop, moderation) uses new coords.\n"
-        f"⚠️ `coords.py` constants in imported modules won't reload until the bot restarts."
-    )
 
 # ── /help ─────────────────────────────────────────────────────────────────────
 

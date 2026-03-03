@@ -44,25 +44,26 @@ STEP_MODE              = False        # True = pause before every tap (debug onl
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Coordinates ───────────────────────────────────────────────────────────────
-PROFILE_BUTTON  = (76,   62)           # top-left profile icon
-MY_CLAN_BUTTON  = (814,  92)           # "my clan" button next to profile
-SORT_FILTER_BTN = (1000, 842)          # sort/filter toggle (press 3× → Last Active)
-SHARE_ICON      = (766,  294)          # share icon on member profile page
-COPY_TAG_BTN    = (938,  310)          # "Copy player tag" from share sheet
-BACK_ARROW      = (266,  80)           # back arrow (member profile → member list)
-CONFIRM_KICK    = (1188, 508)          # kick confirmation dialog — OK
-CANCEL_KICK     = (734,  506)          # kick confirmation dialog — Cancel
+# ── Coordinates (1440x720) ────────────────────────────────────────────────────
+PROFILE_BUTTON  = ( 52,  38)   # top-left profile icon
+MY_CLAN_BUTTON  = (622,  58)   # "my clan" button next to profile
+SORT_FILTER_BTN = (750, 564)   # sort/filter toggle (press 3× → Last Active)
+SHARE_ICON      = (598, 202)   # share icon on member profile page
+COPY_TAG_BTN    = (716, 210)   # "Copy player tag" from share sheet
+BACK_ARROW      = (250,  56)   # back arrow (member profile → member list)
+CONFIRM_KICK    = (888, 332)   # kick confirmation dialog — OK
+CANCEL_KICK     = (586, 338)   # kick confirmation dialog — Cancel
 
 # Bottom-of-list rows after scrolling all the way down.
 # Index 0 = very last player, 1 = second-to-last, … up to 5.
 # Each tuple: (player_tap, profile_btn, kick_btn)
 BOTTOM_ROWS = [
-    ((968, 962),  (1172, 666),  (1174, 994)),   # 0 – last (very bottom)
-    ((912, 832),  (1164, 648),  (1166, 992)),   # 1 – 2nd from bottom
-    ((928, 710),  (1170, 550),  (1166, 874)),   # 2 – 3rd from bottom
-    ((890, 584),  (1170, 416),  (1170, 758)),   # 3 – 4th from bottom
-    ((906, 454),  (1172, 292),  (1172, 636)),   # 4 – 5th from bottom
-    ((870, 330),  (1182, 158),  (1156, 500)),   # 5 – 6th from bottom
+    ((626, 640), (862, 440), (850, 662)),  # 0 – last (very bottom)
+    ((640, 556), (860, 446), (856, 662)),  # 1
+    ((616, 476), (846, 364), (864, 594)),  # 2
+    ((616, 384), (864, 280), (854, 510)),  # 3
+    ((632, 298), (864, 190), (846, 424)),  # 4
+    ((634, 218), (864, 102), (856, 332)),  # 5
 ]
 
 # Regex to find a CoC tag in clipboard text
@@ -158,12 +159,12 @@ def _scroll_to_bottom(device: ADBDevice) -> None:
     """Swipe upward many times to reach the very bottom of the member list."""
     logger.info("Scrolling to bottom of member list…")
     for _ in range(10):
-        device.swipe(960, 800, 960, 200, 600)
+        device.swipe(720, 668, 720, 200, 600)
         time.sleep(0.4)
     # Two final slow swipes to fully settle
-    device.swipe(960, 900, 960, 200, 800)
+    device.swipe(720, 668, 720, 200, 800)
     time.sleep(0.5)
-    device.swipe(960, 900, 960, 200, 800)
+    device.swipe(720, 668, 720, 200, 800)
     time.sleep(0.8)
 
 

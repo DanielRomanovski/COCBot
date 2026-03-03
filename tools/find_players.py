@@ -31,9 +31,9 @@ MIN_DONATIONS  = 1000     # minimum monthly troops donated
 # Output file — written to tools/found_players.txt
 OUTPUT_FILE = Path(__file__).parent / "found_players.txt"
 
-# Coordinates on the clan view screen
-TAP_TAG_COORD  = (998,  306)   # tap the clan tag text to select it
-TAP_COPY_COORD = (1176, 314)   # tap the Copy button that pops up
+# Coordinates on the clan view screen (1440x720)
+TAP_TAG_COORD  = (748, 204)   # tap the clan tag text to select it
+TAP_COPY_COORD = (864, 210)   # tap the Copy button that pops up
 
 # Regex to find a CoC tag anywhere in a string (e.g. "#2CLOPC8PO")
 _TAG_RE = re.compile(r"#([A-Z0-9]{4,12})")
