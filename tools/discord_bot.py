@@ -15,6 +15,7 @@ Background task:
   Every N hours (activity_check_interval_hours) the activity tracker is
   refreshed silently via the CoC API with no ADB interaction.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -244,53 +245,9 @@ def _build_embed(ranked: list[MemberScore]) -> discord.Embed:
 
 # ── Bot ───────────────────────────────────────────────────────────────────────
 
-# ── Console remote shell ─────────────────────────────────────────────────────
-# Messages sent in the console webhook channel by admins are executed as shell
-# commands on the server. Output is posted back to the same channel.
-
-_CONSOLE_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/1477923684365635730/"
-    "BYi0pohQl4yFwuGNEwZ9ZL_62UOQVzvYDL1WJevjqGDHwSk8Svbo60Wpx83J7beW8MMq"
-)
-_console_channel_id: int | None = None
-
-
-async def _run_command(cmd: str) -> str:
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        return "⏱️ Timed out after 30s"
-    output = stdout.decode(errors="replace").strip()
-    return output or "(no output)"
-
-
-async def _console_reply(content: str) -> None:
-    """Send command output back to the console channel via webhook, chunked."""
-    webhook = discord.Webhook.from_url(_CONSOLE_WEBHOOK_URL, client=client)
-    max_len = 1990
-    lines = content.splitlines(keepends=True)
-    chunk = ""
-    for line in lines:
-        if len(chunk) + len(line) > max_len:
-            await webhook.send(f"```\n{chunk}\n```", username="cocbot/shell")
-            chunk = ""
-        chunk += line
-    if chunk:
-        await webhook.send(f"```\n{chunk}\n```", username="cocbot/shell")
-
-
-# ── Bot ───────────────────────────────────────────────────────────────────────
-
 class CoCBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
-        intents.message_content = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self._last_activity_check: datetime = datetime.now(timezone.utc)
@@ -305,14 +262,6 @@ class CoCBot(discord.Client):
 
     async def on_ready(self) -> None:
         logger.success("Logged in as {} (ID: {})", self.user, self.user.id)
-        # Resolve the console webhook channel so on_message knows where to listen
-        global _console_channel_id
-        try:
-            wh = await self.fetch_webhook(1477923684365635730)
-            _console_channel_id = wh.channel_id
-            logger.info("[console] Remote shell active in channel {}", _console_channel_id)
-        except Exception as exc:
-            logger.warning("[console] Could not fetch webhook channel: {}", exc)
 
     @tasks.loop(minutes=30)
     async def activity_check_task(self) -> None:
@@ -331,28 +280,6 @@ class CoCBot(discord.Client):
     @activity_check_task.before_loop
     async def before_activity_check(self) -> None:
         await self.wait_until_ready()
-
-    async def on_message(self, message: discord.Message) -> None:
-        if _console_channel_id is None:
-            return
-        if message.channel.id != _console_channel_id:
-            return
-        if message.author.bot:
-            return
-        if not isinstance(message.author, discord.Member):
-            return
-        perms = message.author.guild_permissions
-        if not (perms.administrator or perms.manage_guild):
-            return
-        cmd = message.content.strip()
-        if not cmd:
-            return
-        logger.info("[console] {} ran: {}", message.author, cmd)
-        try:
-            output = await _run_command(cmd)
-            await _console_reply(output)
-        except Exception as exc:
-            await _console_reply(f"❌ Error: {exc}")
 
 
 client = CoCBot()
