@@ -74,6 +74,12 @@ GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0"))
 CLAN_NAME = "mariners"
 CLAN_MAX  = 50
 
+# ── ADB targets (for /adbtarget testing command) ──────────────────────────────
+_ADB_TARGETS: dict[str, tuple[str, int]] = {
+    "phone":      ("10.0.0.47",  5555),   # physical Android phone over WiFi
+    "bluestacks": ("127.0.0.1",  5556),   # Windows BlueStacks (local)
+}
+
 
 _invite_proc: asyncio.subprocess.Process | None = None
 
@@ -491,6 +497,36 @@ async def help_cmd(interaction: discord.Interaction) -> None:
     embed.set_footer(text="🔒 = Admin / Manage Guild required  •  Activity tracker auto-refreshes every N hours (activity_check_interval_hours)")
     await interaction.response.send_message(embed=embed)
 
+# ── /adbtarget ───────────────────────────────────────────────────────────────────────
+
+@client.tree.command(name="adbtarget", description="[Admin] Switch ADB target between phone and BlueStacks (testing)")
+@app_commands.describe(target="Which device to connect to")
+@app_commands.choices(target=[
+    app_commands.Choice(name="phone — physical Android (10.0.0.47:5555)",  value="phone"),
+    app_commands.Choice(name="bluestacks — Windows emulator (127.0.0.1:5556)", value="bluestacks"),
+])
+async def adbtarget_cmd(interaction: discord.Interaction, target: str = "") -> None:
+    if not _is_admin(interaction):
+        await interaction.response.send_message(_ADMIN_DENIED, ephemeral=True)
+        return
+
+    if not target:
+        current = f"{settings.adb_host}:{settings.adb_port}"
+        lines = ["**Current ADB target:** `" + current + "`", ""]
+        for name, (host, port) in _ADB_TARGETS.items():
+            marker = " ◀ active" if (settings.adb_host == host and settings.adb_port == port) else ""
+            lines.append(f"• `{name}` — `{host}:{port}`{marker}")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        return
+
+    host, port = _ADB_TARGETS[target]
+    settings.adb_host = host  # type: ignore[misc]
+    settings.adb_port = port  # type: ignore[misc]
+    logger.info("[adbtarget] Switched to {} ({}:{})", target, host, port)
+    await interaction.response.send_message(
+        f"✅ ADB target switched to **{target}** — `{host}:{port}`\n"
+        f"⚠️ This is in-memory only; the bot reverts to `.env` values on restart."
+    )
 
 # ── Entry-point ───────────────────────────────────────────────────────────────
 
