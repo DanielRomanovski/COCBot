@@ -22,10 +22,6 @@ from cocbot.adb.device import ADBDevice
 from cocbot.api.client import CoCAPIClient
 from cocbot.config import settings
 import config_manager
-from coords import (
-    FP_TAP_TAG_COORD  as TAP_TAG_COORD,
-    FP_TAP_COPY_COORD as TAP_COPY_COORD,
-)
 
 # Defaults — live values are read from bot_config.json at runtime
 MIN_TH         = 14       # minimum town hall level (inclusive)
@@ -34,6 +30,10 @@ MIN_DONATIONS  = 1000     # minimum monthly troops donated
 
 # Output file — written to tools/found_players.txt
 OUTPUT_FILE = Path(__file__).parent / "found_players.txt"
+
+# Coordinates on the clan view screen
+TAP_TAG_COORD  = (998,  306)   # tap the clan tag text to select it
+TAP_COPY_COORD = (1176, 314)   # tap the Copy button that pops up
 
 # Regex to find a CoC tag anywhere in a string (e.g. "#2CLOPC8PO")
 _TAG_RE = re.compile(r"#([A-Z0-9]{4,12})")

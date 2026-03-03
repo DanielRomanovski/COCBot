@@ -19,26 +19,6 @@ from cocbot.config import settings
 from find_players import find_players, OUTPUT_FILE as PLAYERS_FILE
 from invite_players import invite_players, _go_to_main
 import config_manager
-from coords import (
-    sc,
-    PROFILE_BUTTON,
-    NB_CLANS_BUTTON   as CLANS_BUTTON,
-    NB_REFRESH_BUTTON as REFRESH_BUTTON,
-    NB_VIEW_CLAN,
-    NB_BACK_ARROW,
-    NB_CLAN_CHORDS,
-    NB_CLAN7_10_CHORDS,
-    NB_SCROLL_X       as SCROLL_X,
-    NB_SCROLL_FROM_Y  as SCROLL_FROM_Y,
-    NB_SCROLL_TO_Y    as SCROLL_TO_Y,
-    NB_DRAG_MENU_DOWN_FROM,
-    NB_DRAG_MENU_DOWN_TO,
-    NB_DRAG_TO_TOP_FROM,
-    NB_DRAG_TO_TOP_TO,
-    NB_DRAG_TO_TOP_REPEAT,
-)
-
-SCROLL_DURATION = 500    # ms
 
 
 def _queued_players() -> int:
@@ -47,29 +27,52 @@ def _queued_players() -> int:
         return 0
     return sum(1 for line in PLAYERS_FILE.read_text().splitlines() if line.strip())
 
+
+PROFILE_BUTTON = (76, 62)
+CLANS_BUTTON = (1136, 90)
+
+CLAN_CHORDS = [
+  (554, 310),  # Clan 1
+  (1322, 306), # Clan 2
+  (584, 572),  # Clan 3
+  (1328, 560), # Clan 4
+  (578, 906),  # Clan 5
+  (1318, 888), # Clan 6
+]
+
+CLAN7_10_CHORDS = [
+  (606, 356),  # Clan 7
+  (1316, 342), # Clan 8
+  (594, 686),  # Clan 9
+  (1336, 670), # Clan 10
+]
+
+REFRESH_BUTTON = (980, 940)
+
+# Scroll: swipe upward (finger moves up) to reveal clans further down the list.
+SCROLL_X        = 960    # horizontal centre
+SCROLL_FROM_Y   = 1600   # swipe start (bottom)
+SCROLL_TO_Y     = 400    # swipe end (top)
+SCROLL_DURATION = 500    # ms
+
 DELAY_AFTER_TAP    = 1.5  # seconds to wait after tapping a clan card
 DELAY_AFTER_SCROLL = 0.5  # pause between consecutive scrolls
 
 
 def drag_menu_down(device: ADBDevice):
-    x1, y1 = NB_DRAG_MENU_DOWN_FROM
-    x2, y2 = NB_DRAG_MENU_DOWN_TO
-    device.swipe(x1, y1, x2, y2, 600)
+    device.swipe(960, 1016, 962, 724, 600)
     time.sleep(1)
 
 
 def drag_to_top(device: ADBDevice):
-    x1, y1 = NB_DRAG_TO_TOP_FROM
-    x2, y2 = NB_DRAG_TO_TOP_TO
-    for _ in range(NB_DRAG_TO_TOP_REPEAT):
-        device.swipe(x1, y1, x2, y2, 800)
-        time.sleep(0.5)
+    device.swipe(960, 1016, 960, 0, 800)
     time.sleep(1)
 
 
 def fast_scroll_to_bottom(device: ADBDevice):
+    center_x = settings.emulator_width // 2
     for _ in range(10):
-        device.swipe(SCROLL_X, SCROLL_FROM_Y, SCROLL_X, SCROLL_TO_Y, 200)
+        device.swipe(center_x, SCROLL_FROM_Y, center_x, SCROLL_TO_Y, 200)
         time.sleep(0.2)
 
 
@@ -94,10 +97,24 @@ def main() -> None:
     logger.info("Connecting to ADB at {}:{}", settings.adb_host, settings.adb_port)
     device.connect()
 
-    CLAN_STEPS     = [(x, y, f"Clan {i+1}")  for i, (x, y) in enumerate(NB_CLAN_CHORDS)]
-    CLAN7_10_STEPS = [(x, y, f"Clan {i+7}")  for i, (x, y) in enumerate(NB_CLAN7_10_CHORDS)]
-    VIEW_CLAN  = NB_VIEW_CLAN
-    BACK_ARROW = NB_BACK_ARROW
+    CLAN_STEPS = [
+      (554, 310,  "Clan 1"),
+      (1322, 306, "Clan 2"),
+      (584, 572,  "Clan 3"),
+      (1328, 560, "Clan 4"),
+      (578, 906,  "Clan 5"),
+      (1318, 888, "Clan 6"),
+    ]
+
+    CLAN7_10_STEPS = [
+      (606, 356,  "Clan 7"),
+      (1316, 342, "Clan 8"),
+      (594, 686,  "Clan 9"),
+      (1336, 670, "Clan 10"),
+    ]
+
+    VIEW_CLAN   = (800, 868)
+    BACK_ARROW  = (268, 78)
 
     def process_clans(steps) -> int:
         """Tap each clan, call find_players, return total new players found."""

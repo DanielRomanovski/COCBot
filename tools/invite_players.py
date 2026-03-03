@@ -19,15 +19,15 @@ load_dotenv()
 
 from cocbot.adb.device import ADBDevice, DeviceConfig
 from cocbot.config import settings
-from coords import (
-    PROFILE_BUTTON,
-    INV_SOCIAL_TAB     as SOCIAL_TAB,
-    INV_SEARCH_PLAYERS as SEARCH_PLAYERS,
-    INV_SEARCH_INPUT   as SEARCH_INPUT,
-    INV_SEARCH_BUTTON  as SEARCH_BUTTON,
-    INV_INVITE_BUTTON  as INVITE_BUTTON,
-    INV_BACK_ARROW     as BACK_ARROW,
-)
+
+# ── Coordinates ───────────────────────────────────────────────────────────────
+PROFILE_BUTTON  = (76,   62)
+SOCIAL_TAB      = (1464, 82)
+SEARCH_PLAYERS  = (1478, 200)
+SEARCH_INPUT    = (612,  306)
+SEARCH_BUTTON   = (1318, 302)
+INVITE_BUTTON   = (696,  564)
+BACK_ARROW      = (266,  78)
 
 # ── File ──────────────────────────────────────────────────────────────────────
 PLAYERS_FILE = Path(__file__).parent / "found_players.txt"
