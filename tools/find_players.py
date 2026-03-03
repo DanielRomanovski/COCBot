@@ -34,6 +34,8 @@ OUTPUT_FILE = Path(__file__).parent / "found_players.txt"
 # CoC tags start with #; Android XML-encodes # as &#35; so handle both forms
 _TAG_RE   = re.compile(r"#([A-Z0-9]{4,12})")
 _TAG_RE_E = re.compile(r"(?:#|&#35;|&#x23;|%23)([A-Z0-9]{4,12})")
+# URL-encoded tag in CoC share URLs: tag=%23XXXXXX
+_URL_TAG_RE = re.compile(r"tag[=/%](?:23|#|&#35;|&#x23;)?([A-Z0-9]{4,12})", re.IGNORECASE)
 
 
 # Coordinates on the clan view screen (1440x720)
@@ -83,16 +85,68 @@ def _read_clipboard(device: ADBDevice) -> str | None:
     return _read_adb_clipboard(device)
 
 
+def _ocr_share_sheet(device: ADBDevice) -> str | None:
+    """Screenshot the open Android share sheet and OCR the URL to extract the clan tag.
+
+    Android 10+ blocks background clipboard reads, so this is the primary method
+    for real phones.  The share sheet shows the full CoC URL in a preview band,
+    e.g. https://link.clashofclans.com/en/?action=OpenClanProfile&tag=%23XXXXXX
+    """
+    try:
+        import pytesseract
+        img = device.screenshot_pil()   # PIL RGB, 1440×720 landscape
+        w, h = img.size
+        # The share sheet slides up from the bottom, URL preview is in the middle band.
+        # Scan multiple horizontal strips to maximise the chance of hitting the text.
+        crops = [
+            img.crop((0, int(h * 0.25), w, int(h * 0.65))),  # upper-mid (most likely)
+            img.crop((0, int(h * 0.60), w, h)),               # bottom strip
+            img,                                              # full screen fallback
+        ]
+        for crop in crops:
+            text = pytesseract.image_to_string(crop, config="--psm 11")
+            logger.debug("OCR share sheet strip ({}×{}): {}", crop.size[0], crop.size[1], repr(text[:200]))
+            # URL-encoded form: tag=%23XXXXXX
+            m = _URL_TAG_RE.search(text)
+            if m:
+                return f"#{m.group(1).upper()}"
+            # Raw form: #XXXXXX (Tesseract may decode %23 → '#')
+            m = _TAG_RE.search(text.upper())
+            if m:
+                return f"#{m.group(1)}"
+    except Exception as exc:
+        logger.warning("OCR share sheet failed: {}", exc)
+    return None
+
+
 def _get_clan_tag(device: ADBDevice) -> str | None:
-    """Tap Share → Copy (puts tag in clipboard), then read it."""
+    """Tap Share → OCR share sheet URL (primary); tap Copy + clipboard (fallback)."""
     time.sleep(1.5)
     logger.info("Tapping Share at {}", TAP_SHARE_BTN)
     device.tap(*TAP_SHARE_BTN)
-    time.sleep(0.8)
-    logger.info("Tapping Copy at {}", TAP_COPY_BTN)
+    time.sleep(2.5)  # allow share sheet animation to complete
+
+    # Primary: OCR the URL shown in the share sheet preview.
+    # Works on Android 10+ without needing clipboard access.
+    tag = _ocr_share_sheet(device)
+    if tag:
+        logger.info("Got clan tag via OCR: {}", tag)
+        device.press_back()   # dismiss share sheet
+        time.sleep(0.8)
+        return tag
+
+    # Fallback: tap Copy → wait → read clipboard (works on BlueStacks / older Android).
+    logger.info("OCR found no tag — tapping Copy at {}", TAP_COPY_BTN)
     device.tap(*TAP_COPY_BTN)
-    time.sleep(0.5)
-    return _read_clipboard(device)
+    time.sleep(1.5)
+    tag = _read_clipboard(device)
+    if tag:
+        return tag
+
+    logger.warning("All tag-extraction methods failed — dismissing share sheet")
+    device.press_back()
+    time.sleep(0.8)
+    return None
 
 
 # ── API fetch & filter ────────────────────────────────────────────────────────
