@@ -80,7 +80,7 @@ CLAN_MAX  = 50
 # ── ADB targets (for /adbtarget testing command) ──────────────────────────────
 _ADB_TARGETS: dict[str, tuple[str, int]] = {
     "phone":      ("10.0.0.47",  5555),   # physical Android phone over WiFi
-    "bluestacks": ("10.0.0.156", 5556),   # Windows BlueStacks (LAN IP of Windows PC)
+    "bluestacks": ("127.0.0.1",  5555),   # BlueStacks (loopback via portproxy)
 }
 
 _show_touches_enabled: bool = False  # tracks show_touches state for /showinputs
@@ -710,34 +710,58 @@ async def help_cmd(interaction: discord.Interaction) -> None:
 
 # ── /adbtarget ───────────────────────────────────────────────────────────────────────
 
-@client.tree.command(name="adbtarget", description="[Admin] Switch ADB target between phone and BlueStacks (testing)")
-@app_commands.describe(target="Which device to connect to")
+@client.tree.command(name="adbtarget", description="[Admin] Switch ADB target between phone, BlueStacks, or a custom address")
+@app_commands.describe(
+    target="Preset device to connect to",
+    address="Custom address in host:port format (e.g. 127.0.0.1:5555) — overrides target",
+)
 @app_commands.choices(target=[
     app_commands.Choice(name="phone — physical Android (10.0.0.47:5555)",  value="phone"),
-    app_commands.Choice(name="bluestacks — Windows emulator (127.0.0.1:5556)", value="bluestacks"),
+    app_commands.Choice(name="bluestacks — loopback emulator (127.0.0.1:5555)", value="bluestacks"),
 ])
-async def adbtarget_cmd(interaction: discord.Interaction, target: str = "") -> None:
+async def adbtarget_cmd(interaction: discord.Interaction, target: str = "", address: str = "") -> None:
     if not _is_admin(interaction):
         await interaction.response.send_message(_ADMIN_DENIED, ephemeral=True)
         return
 
-    if not target:
+    # No args — show current target and available presets
+    if not target and not address:
         current = f"{settings.adb_host}:{settings.adb_port}"
         lines = ["**Current ADB target:** `" + current + "`", ""]
         for name, (host, port) in _ADB_TARGETS.items():
             marker = " ◀ active" if (settings.adb_host == host and settings.adb_port == port) else ""
             lines.append(f"• `{name}` — `{host}:{port}`{marker}")
+        lines.append("")
+        lines.append("Pass `address: host:port` to set a custom address.")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
         return
 
-    host, port = _ADB_TARGETS[target]
+    # Custom address overrides preset
+    if address:
+        if ":" not in address:
+            await interaction.response.send_message(
+                "❌ `address` must be in `host:port` format, e.g. `127.0.0.1:5555`", ephemeral=True
+            )
+            return
+        host_part, _, port_part = address.rpartition(":")
+        try:
+            port = int(port_part)
+        except ValueError:
+            await interaction.response.send_message(f"❌ Invalid port `{port_part}`", ephemeral=True)
+            return
+        host = host_part
+        label = f"custom ({address})"
+    else:
+        host, port = _ADB_TARGETS[target]
+        label = target
+
     settings.adb_host = host  # type: ignore[misc]
     settings.adb_port = port  # type: ignore[misc]
     _write_env_kv("adb_host", host)
     _write_env_kv("adb_port", str(port))
-    logger.info("[adbtarget] Switched to {} ({}:{}) — persisted to .env", target, host, port)
+    logger.info("[adbtarget] Switched to {} ({}:{}) — persisted to .env", label, host, port)
     await interaction.response.send_message(
-        f"✅ ADB target switched to **{target}** — `{host}:{port}`\n"
+        f"✅ ADB target switched to **{label}** — `{host}:{port}`\n"
         f"💾 Saved to `.env` — subprocesses and restarts will use this target."
     )
 
