@@ -35,6 +35,7 @@ from coords import (
     NB_DRAG_MENU_DOWN_TO,
     NB_DRAG_TO_TOP_FROM,
     NB_DRAG_TO_TOP_TO,
+    NB_DRAG_TO_TOP_REPEAT,
 )
 
 SCROLL_DURATION = 500    # ms
@@ -60,7 +61,9 @@ def drag_menu_down(device: ADBDevice):
 def drag_to_top(device: ADBDevice):
     x1, y1 = NB_DRAG_TO_TOP_FROM
     x2, y2 = NB_DRAG_TO_TOP_TO
-    device.swipe(x1, y1, x2, y2, 800)
+    for _ in range(NB_DRAG_TO_TOP_REPEAT):
+        device.swipe(x1, y1, x2, y2, 800)
+        time.sleep(0.5)
     time.sleep(1)
 
 
