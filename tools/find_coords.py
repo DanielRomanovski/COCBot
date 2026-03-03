@@ -27,6 +27,27 @@ load_dotenv()
 from cocbot.adb.device import ADBDevice, DeviceConfig
 from cocbot.config import settings
 
+# ── Device toggle ─────────────────────────────────────────────────────────────
+# Set to "phone" to connect to the physical phone (10.0.0.47:5555, 1440×720)
+# Set to "emulator" to connect to BlueStacks via the .env settings
+DEVICE = "phone"   # "phone" | "emulator"
+
+_DEVICE_CONFIGS = {
+    "emulator": dict(
+        host=settings.adb_host,
+        port=settings.adb_port,
+        width=settings.emulator_width,
+        height=settings.emulator_height,
+    ),
+    "phone": dict(
+        host="10.0.0.47",
+        port=5555,
+        width=1440,
+        height=720,
+    ),
+}
+# ──────────────────────────────────────────────────────────────────────────────
+
 
 def on_click(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -37,16 +58,18 @@ def on_click(event, x, y, flags, param):
 
 
 def main():
+    cfg_kwargs = _DEVICE_CONFIGS[DEVICE]
+    print(f"Connecting to: {DEVICE} ({cfg_kwargs['host']}:{cfg_kwargs['port']}, {cfg_kwargs['width']}×{cfg_kwargs['height']})")
     cfg = DeviceConfig(
-        host=settings.adb_host,
-        port=settings.adb_port,
-        width=settings.emulator_width,
-        height=settings.emulator_height,
+        host=cfg_kwargs["host"],
+        port=cfg_kwargs["port"],
+        width=cfg_kwargs["width"],
+        height=cfg_kwargs["height"],
     )
     device = ADBDevice(cfg)
     device.connect()
 
-    print(f"Connected. Taking screenshot from {settings.emulator_width}×{settings.emulator_height}...")
+    print(f"Connected. Taking screenshot from {cfg.width}×{cfg.height}...")
 
     scale = 0.5
     cv2.namedWindow("Click to get coordinates — ESC to quit")
