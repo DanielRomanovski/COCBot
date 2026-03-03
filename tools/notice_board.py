@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import sys
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -59,41 +58,14 @@ DELAY_AFTER_TAP = 1.5
 _PHONE_HOST = "10.0.0.47"
 
 # ── Watchdog ────────────────────────────────────────────────────────────────
-# If no clipboard tag is successfully read for this many seconds while
-# notice_board/find_players are running, trigger a recovery action.
-WATCHDOG_SECS = 60
-
-# Shared watchdog state (written by watchdog thread, read by main loop)
-_watchdog_event  = threading.Event()   # set = recovery needed
-_watchdog_level  = [0]                 # 1 = forcemenu+restart, 2 = game restart
-_post_l1_time    = [0.0]               # time at which level-1 recovery was attempted
+# If this many consecutive clan tags fail to read, trigger recovery.
+WATCHDOG_MISS_LIMIT = 3
 
 
 class _WatchdogTriggered(Exception):
     def __init__(self, level: int) -> None:
         self.level = level
         super().__init__(f"Watchdog level {level}")
-
-
-def _watchdog_thread_fn(stop: threading.Event) -> None:
-    """Background daemon: sets _watchdog_event if clipboard has been silent too long."""
-    while not stop.is_set():
-        stop.wait(5)          # check every 5 seconds
-        if _watchdog_event.is_set():
-            continue          # already pending, don't overwrite level
-        elapsed = time.time() - _fp_mod.last_tag_time
-        if elapsed < WATCHDOG_SECS:
-            continue
-        # Decide level: if level-1 already ran and STILL nothing after WATCHDOG_SECS → level 2
-        if _post_l1_time[0] > 0 and (time.time() - _post_l1_time[0]) >= WATCHDOG_SECS:
-            _watchdog_level[0] = 2
-        else:
-            _watchdog_level[0] = 1
-        logger.warning(
-            "Watchdog: no clipboard success for {:.0f}s — scheduling level-{} recovery",
-            elapsed, _watchdog_level[0],
-        )
-        _watchdog_event.set()
 
 
 def _forcemenu(device: ADBDevice) -> None:
@@ -192,103 +164,100 @@ def main() -> None:
     CLAN_STEPS     = [(x, y, f"Clan {i+1}")  for i, (x, y) in enumerate(CLAN_CHORDS)]
     CLAN7_10_STEPS = [(x, y, f"Clan {i+7}")  for i, (x, y) in enumerate(CLAN7_10_CHORDS)]
 
+    # Tracks how many consecutive recovery attempts have been made without a
+    # successful tag in between.  0 = none yet, 1 = level-1 ran, 2+ = level-2.
+    _recovery_count = 0
+
     def process_clans(steps) -> int:
-        """Tap each clan, call find_players, return total new players found.
-        Raises _WatchdogTriggered if the watchdog fires mid-scan.
+        """Tap each clan, call find_players, check watchdog after each.
+        Raises _WatchdogTriggered(level) if misses hit the limit.
         """
+        nonlocal _recovery_count
         total = 0
         for x, y, label in steps:
-            if _watchdog_event.is_set():
-                raise _WatchdogTriggered(_watchdog_level[0])
             tap(device, x, y, label)
             tap(device, *VIEW_CLAN, "View Clan")
             total += find_players(device)
             tap(device, *BACK_ARROW, "Go Back to Clan Search")
+            if _fp_mod.consecutive_tag_misses >= WATCHDOG_MISS_LIMIT:
+                level = 2 if _recovery_count >= 1 else 1
+                logger.warning(
+                    "Watchdog: {} consecutive tag misses — triggering level-{} recovery",
+                    _fp_mod.consecutive_tag_misses, level,
+                )
+                raise _WatchdogTriggered(level)
+            elif _fp_mod.consecutive_tag_misses == 0:
+                # A successful tag resets the recovery streak
+                _recovery_count = 0
         return total
 
-    # Initialise heartbeat so the watchdog doesn't fire before the first tag attempt
-    _fp_mod.last_tag_time = time.time()
-
-    # Start watchdog daemon thread
-    _wd_stop = threading.Event()
-    _wd_thread = threading.Thread(
-        target=_watchdog_thread_fn, args=(_wd_stop,), daemon=True, name="watchdog"
-    )
-    _wd_thread.start()
-    logger.info("Watchdog started (timeout={}s)", WATCHDOG_SECS)
+    # Reset miss counter at startup
+    _fp_mod.consecutive_tag_misses = 0
+    logger.info("Watchdog active: recovery after {} consecutive tag misses", WATCHDOG_MISS_LIMIT)
 
     # Navigate to the clan search page once
     tap(device, *PROFILE_BUTTON, "Profile")
     tap(device, *CLANS_BUTTON, "Clans")
 
-    try:
-        while True:
-            try:
-                _watchdog_event.clear()
+    while True:
+        try:
+            # Scroll down to reveal clans 1-6 in the first two columns
+            drag_menu_down(device)
 
-                # Scroll down to reveal clans 1-6 in the first two columns
-                drag_menu_down(device)
+            # Clans 1-6
+            process_clans(CLAN_STEPS)
 
-                # Clans 1-6
-                process_clans(CLAN_STEPS)
+            # Check after first batch
+            if _queued_players() >= config_manager.get("invite_every"):
+                logger.info("{} players queued — switching to invite mode", _queued_players())
+                invite_players(device, standalone=False)
+                tap(device, *PROFILE_BUTTON, "Profile")
+                tap(device, *CLANS_BUTTON, "Clans")
+                continue
 
-                # Check after first batch
-                if _queued_players() >= config_manager.get("invite_every"):
-                    logger.info("{} players queued — switching to invite mode", _queued_players())
-                    invite_players(device, standalone=False)
-                    tap(device, *PROFILE_BUTTON, "Profile")
-                    tap(device, *CLANS_BUTTON, "Clans")
-                    continue
+            # Drag back to the top to reach clans 7-10
+            drag_to_top(device)
 
-                # Drag back to the top to reach clans 7-10
-                drag_to_top(device)
+            # Clans 7-10
+            process_clans(CLAN7_10_STEPS)
 
-                # Clans 7-10
-                process_clans(CLAN7_10_STEPS)
+            # Refresh loads a new set of clans
+            tap(device, *REFRESH_BUTTON, "Refresh")
+            logger.info("Refresh complete — {} player(s) queued", _queued_players())
 
-                # Refresh loads a new set of clans
-                tap(device, *REFRESH_BUTTON, "Refresh")
-                logger.info("Refresh complete — {} player(s) queued", _queued_players())
+            # Check after second batch / refresh
+            if _queued_players() >= config_manager.get("invite_every"):
+                logger.info("{} players queued — switching to invite mode", _queued_players())
+                invite_players(device, standalone=False)
+                tap(device, *PROFILE_BUTTON, "Profile")
+                tap(device, *CLANS_BUTTON, "Clans")
 
-                # Check after second batch / refresh
-                if _queued_players() >= config_manager.get("invite_every"):
-                    logger.info("{} players queued — switching to invite mode", _queued_players())
-                    invite_players(device, standalone=False)
-                    tap(device, *PROFILE_BUTTON, "Profile")
-                    tap(device, *CLANS_BUTTON, "Clans")
+        except _WatchdogTriggered as exc:
+            _recovery_count += 1
+            _fp_mod.consecutive_tag_misses = 0  # reset so we measure fresh after recovery
 
-            except _WatchdogTriggered as exc:
-                _watchdog_event.clear()
+            if exc.level == 1:
+                logger.warning(
+                    "Watchdog level 1 (attempt {}): running forcemenu and restarting scan",
+                    _recovery_count,
+                )
+                _forcemenu(device)
+                tap(device, *PROFILE_BUTTON, "Profile")
+                tap(device, *CLANS_BUTTON, "Clans")
 
-                if exc.level == 1:
-                    logger.warning(
-                        "Watchdog level 1: no clipboard success for {}s — "
-                        "running forcemenu and restarting scan",
-                        WATCHDOG_SECS,
-                    )
-                    _forcemenu(device)
-                    _post_l1_time[0] = time.time()
-                    _fp_mod.last_tag_time = time.time()  # reset heartbeat
-                    tap(device, *PROFILE_BUTTON, "Profile")
-                    tap(device, *CLANS_BUTTON, "Clans")
-
-                else:  # level 2
-                    logger.error(
-                        "Watchdog level 2: clipboard still silent after level-1 recovery — "
-                        "restarting game and waiting 120s"
-                    )
-                    device.force_stop_coc()
-                    time.sleep(3)
-                    device.launch_coc()
-                    time.sleep(120)   # slow phone — wait for full load
-                    _forcemenu(device)
-                    _post_l1_time[0] = 0.0          # reset level tracking
-                    _fp_mod.last_tag_time = time.time()
-                    tap(device, *PROFILE_BUTTON, "Profile")
-                    tap(device, *CLANS_BUTTON, "Clans")
-
-    finally:
-        _wd_stop.set()
+            else:  # level 2
+                logger.error(
+                    "Watchdog level 2 (attempt {}): restarting game and waiting 120s",
+                    _recovery_count,
+                )
+                device.force_stop_coc()
+                time.sleep(3)
+                device.launch_coc()
+                time.sleep(120)   # slow phone — wait for full load
+                _forcemenu(device)
+                _recovery_count = 0  # full reset after game restart
+                tap(device, *PROFILE_BUTTON, "Profile")
+                tap(device, *CLANS_BUTTON, "Clans")
 
 
 if __name__ == "__main__":

@@ -11,10 +11,10 @@ import time
 import urllib.request
 from pathlib import Path
 
-# ── Watchdog heartbeat ────────────────────────────────────────────────────────
-# Updated every time _get_clan_tag successfully returns a tag.
-# notice_board.py monitors this to detect when the clipboard has gone silent.
-last_tag_time: float = 0.0
+# ── Watchdog counter ────────────────────────────────────────────────────────
+# Incremented each time _get_clan_tag fails to find a tag, reset on success.
+# notice_board.py checks this after every clan to trigger recovery.
+consecutive_tag_misses: int = 0
 
 from loguru import logger
 
@@ -130,26 +130,35 @@ def _get_clan_tag(device: ADBDevice) -> str | None:
     # Try direct HTTP read first (works on BlueStacks / rooted / older Android)
     tag = _read_http_clipboard()
     if tag:
-        _record_tag_success()
+        _on_tag_success()
         return tag
 
     # Android 10 restriction: background apps can't read clipboard.
     # Fix: bring Termux to foreground so it has permission, then return to CoC.
     tag = _read_clipboard_via_termux_foreground(device)
     if tag:
-        _record_tag_success()
+        _on_tag_success()
         return tag
 
     # Last resort: ADB dumpsys (sometimes works on non-rooted Android 10)
     tag = _read_adb_clipboard(device)
     if tag:
-        _record_tag_success()
-    return tag
+        _on_tag_success()
+        return tag
+
+    _on_tag_miss()
+    return None
 
 
-def _record_tag_success() -> None:
-    global last_tag_time
-    last_tag_time = time.time()
+def _on_tag_success() -> None:
+    global consecutive_tag_misses
+    consecutive_tag_misses = 0
+
+
+def _on_tag_miss() -> None:
+    global consecutive_tag_misses
+    consecutive_tag_misses += 1
+    logger.warning("Consecutive tag misses: {}", consecutive_tag_misses)
 
 
 # ── API fetch & filter ────────────────────────────────────────────────────────
