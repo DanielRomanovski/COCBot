@@ -80,7 +80,7 @@ CLAN_MAX  = 50
 # ── ADB targets (for /adbtarget testing command) ──────────────────────────────
 _ADB_TARGETS: dict[str, tuple[str, int]] = {
     "phone":      ("10.0.0.47",  5555),   # physical Android phone over WiFi
-    "bluestacks": ("127.0.0.1",  5555),   # BlueStacks (loopback via portproxy)
+    "bluestacks": ("10.0.0.156", 5556),   # Windows BlueStacks (portproxy → 127.0.0.1:5555 on Windows)
 }
 
 _show_touches_enabled: bool = False  # tracks show_touches state for /showinputs
@@ -717,7 +717,7 @@ async def help_cmd(interaction: discord.Interaction) -> None:
 )
 @app_commands.choices(target=[
     app_commands.Choice(name="phone — physical Android (10.0.0.47:5555)",  value="phone"),
-    app_commands.Choice(name="bluestacks — loopback emulator (127.0.0.1:5555)", value="bluestacks"),
+    app_commands.Choice(name="bluestacks — Windows portproxy (10.0.0.156:5556)", value="bluestacks"),
 ])
 async def adbtarget_cmd(interaction: discord.Interaction, target: str = "", address: str = "") -> None:
     if not _is_admin(interaction):
