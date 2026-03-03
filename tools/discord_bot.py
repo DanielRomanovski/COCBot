@@ -6,6 +6,7 @@ Commands:
   /invite start [moderate]  – Start the notice-board / invite loop  [admin]
   /invite stop              – Stop the invite loop  [admin]
   /invite status            – Loop state + current recruit filters
+  /invite logs              – Last lines from the notice_board subprocess log
   /config [key] [value]     – View or change a bot setting (set requires admin)
   /screenshot               – Post a screenshot of the emulator  [admin]
   /forcemenu                – ESC ×7 + Cancel to reach the main screen  [admin]
@@ -92,6 +93,19 @@ _RESOLUTIONS: dict[str, tuple[int, int]] = {
 
 
 _invite_proc: asyncio.subprocess.Process | None = None
+_INVITE_LOG_FILE = Path("/tmp/notice_board.log")
+
+
+def _read_log_tail(lines: int = 20) -> str:
+    """Return the last `lines` lines of the invite subprocess log."""
+    if not _INVITE_LOG_FILE.exists():
+        return "(no log file)"
+    text = _INVITE_LOG_FILE.read_text(encoding="utf-8", errors="replace").strip()
+    if not text:
+        return "(empty log)"
+    all_lines = text.splitlines()
+    return "\n".join(all_lines[-lines:])
+
 
 
 async def _start_invite_loop(moderate: bool) -> str:
@@ -103,13 +117,22 @@ async def _start_invite_loop(moderate: bool) -> str:
     except Exception as exc:
         return f"❌ ADB navigation failed: {exc}"
     config_manager.set_value("moderate_on_invite", "true" if moderate else "false")
+    log_fh = open(_INVITE_LOG_FILE, "w")  # noqa: SIM115
     _invite_proc = await asyncio.create_subprocess_exec(
         sys.executable,
         str(ROOT / "tools" / "notice_board.py"),
         cwd=str(ROOT),
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        stdout=log_fh,
+        stderr=log_fh,
     )
+    # Give it a brief window to detect an immediate import/startup crash
+    await asyncio.sleep(2.5)
+    if _invite_proc.returncode is not None:
+        tail = _read_log_tail()
+        return (
+            f"❌ Invite loop crashed immediately (code {_invite_proc.returncode}):\n"
+            f"```\n{tail}\n```"
+        )
     return f"✅ Invite loop started (PID {_invite_proc.pid})  •  moderate_on_invite={moderate}"
 
 
@@ -141,7 +164,11 @@ def _invite_status() -> str:
             f"🟢 Invite loop: **running** (PID {_invite_proc.pid})\n"
             f"   moderate_on_invite = `{moderate}`"
         )
-    return f"🔴 Invite loop: **exited** (code {_invite_proc.returncode})"
+    tail = _read_log_tail()
+    return (
+        f"🔴 Invite loop: **exited** (code {_invite_proc.returncode})\n"
+        f"Last log:\n```\n{tail}\n```"
+    )
 
 
 # ── Admin guard ───────────────────────────────────────────────────────────────
@@ -360,6 +387,14 @@ class InviteGroup(app_commands.Group):
         await interaction.response.defer()
         result = await _stop_invite_loop()
         await interaction.followup.send(result)
+
+    @app_commands.command(name="logs", description="Show last lines from the notice_board.py subprocess log")
+    @app_commands.describe(n="Number of lines to show (default 20)")
+    async def logs(self, interaction: discord.Interaction, n: int = 20) -> None:
+        tail = _read_log_tail(lines=min(n, 80))
+        if len(tail) > 1900:
+            tail = "..." + tail[-1900:]
+        await interaction.response.send_message(f"```\n{tail}\n```")
 
     @app_commands.command(name="status", description="Check invite loop status and current recruit filters")
     async def status(self, interaction: discord.Interaction) -> None:
@@ -681,10 +716,12 @@ async def adbtarget_cmd(interaction: discord.Interaction, target: str = "") -> N
     host, port = _ADB_TARGETS[target]
     settings.adb_host = host  # type: ignore[misc]
     settings.adb_port = port  # type: ignore[misc]
-    logger.info("[adbtarget] Switched to {} ({}:{})", target, host, port)
+    _write_env_kv("adb_host", host)
+    _write_env_kv("adb_port", str(port))
+    logger.info("[adbtarget] Switched to {} ({}:{}) — persisted to .env", target, host, port)
     await interaction.response.send_message(
         f"✅ ADB target switched to **{target}** — `{host}:{port}`\n"
-        f"⚠️ This is in-memory only; the bot reverts to `.env` values on restart."
+        f"💾 Saved to `.env` — subprocesses and restarts will use this target."
     )
 
 # ── Entry-point ───────────────────────────────────────────────────────────────
