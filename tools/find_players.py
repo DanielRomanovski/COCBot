@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import re
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
 from loguru import logger
@@ -31,37 +33,66 @@ OUTPUT_FILE = Path(__file__).parent / "found_players.txt"
 
 # CoC tags start with #; Android XML-encodes # as &#35; so handle both forms
 _TAG_RE   = re.compile(r"#([A-Z0-9]{4,12})")
-_TAG_RE_E = re.compile(r"(?:#|&#35;|&#x23;)([A-Z0-9]{4,12})")
+_TAG_RE_E = re.compile(r"(?:#|&#35;|&#x23;|%23)([A-Z0-9]{4,12})")
 
 
-# ── Tag reading ───────────────────────────────────────────────────────────────
+# Coordinates on the clan view screen (1440x720)
+TAP_SHARE_BTN  = (738, 202)   # share button → reveals Copy + Share options
+TAP_COPY_BTN   = (854, 206)   # Copy option → puts tag in Windows clipboard on BlueStacks host
 
-def _read_ui_tag(device: ADBDevice) -> str | None:
-    """Read the CoC tag visible on screen via Android UI dump.
-    Android XML-encodes '#' as '&#35;', so we match both forms.
-    """
-    xml = device._shell("uiautomator dump /sdcard/ui_dump.xml >/dev/null 2>&1 && cat /sdcard/ui_dump.xml")
-    logger.debug("UI dump length: {} chars", len(xml))
-    # Log a snippet around any '#' or '&#' to help diagnose encoding
-    upper = xml.upper()
-    idx = next((i for i in range(len(upper)) if upper[i:i+1] == '#' or upper[i:i+3] == '&#3'), -1)
-    if idx >= 0:
-        logger.debug("XML snippet near '#': ...{}...", repr(xml[max(0,idx-10):idx+30]))
-    else:
-        logger.debug("XML first 200 chars: {}", repr(xml[:200]))
-    match = _TAG_RE_E.search(upper)
-    if match:
-        tag = f"#{match.group(1)}"
-        logger.info("UI tag: {}", tag)
-        return tag
-    logger.warning("No CoC tag found in UI dump (len={})", len(xml))
+# clipboard_server.py must be running on the BlueStacks Windows machine
+_CLIPBOARD_SERVER = f"http://{settings.adb_host}:8765/clipboard"
+
+
+def _read_http_clipboard() -> str | None:
+    """Fetch clipboard text from clipboard_server.py running on the BlueStacks host."""
+    try:
+        with urllib.request.urlopen(_CLIPBOARD_SERVER, timeout=3) as resp:
+            text = resp.read().decode("utf-8").strip().upper()
+        logger.debug("HTTP clipboard: {}", text)
+        match = _TAG_RE.search(text)
+        if match:
+            return f"#{match.group(1)}"
+        logger.warning("Clipboard had no CoC tag: {}", text)
+    except Exception as exc:
+        logger.debug("HTTP clipboard server unreachable, falling back to ADB ({})", exc)
     return None
 
 
+def _read_adb_clipboard(device: ADBDevice) -> str | None:
+    """Read Android clipboard via ADB — works on real Android devices."""
+    out = device._shell("service call clipboard 2 i32 1 2>/dev/null")
+    logger.debug("ADB clipboard raw: {}", repr(out[:200]))
+    # Decode UTF-16LE pairs from the parcel hex dump
+    # Each '...' quoted section has chars like 't.a.g.' — join them
+    chars = re.findall(r"'([^']+)'", out)
+    text = "".join(chars).replace(".", "").upper()
+    logger.debug("ADB clipboard decoded: {}", text)
+    match = _TAG_RE.search(text)
+    if match:
+        return f"#{match.group(1)}"
+    logger.warning("No CoC tag in ADB clipboard: {}", text[:100])
+    return None
+
+
+def _read_clipboard(device: ADBDevice) -> str | None:
+    """Try HTTP clipboard bridge (BlueStacks), then fall back to ADB (real phone)."""
+    tag = _read_http_clipboard()
+    if tag:
+        return tag
+    return _read_adb_clipboard(device)
+
+
 def _get_clan_tag(device: ADBDevice) -> str | None:
-    """Read the clan tag from the visible UI — no clipboard needed."""
-    # The tag is already displayed on the clan view screen; just dump the UI.
-    return _read_ui_tag(device)
+    """Tap Share → Copy (puts tag in clipboard), then read it."""
+    time.sleep(1.5)
+    logger.info("Tapping Share at {}", TAP_SHARE_BTN)
+    device.tap(*TAP_SHARE_BTN)
+    time.sleep(0.8)
+    logger.info("Tapping Copy at {}", TAP_COPY_BTN)
+    device.tap(*TAP_COPY_BTN)
+    time.sleep(0.5)
+    return _read_clipboard(device)
 
 
 # ── API fetch & filter ────────────────────────────────────────────────────────
