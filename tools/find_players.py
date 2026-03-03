@@ -28,8 +28,18 @@ MIN_TH         = 14       # minimum town hall level (inclusive)
 MAX_TH         = 18       # maximum town hall level (inclusive)
 MIN_DONATIONS  = 1000     # minimum monthly troops donated
 
-# Output file — written to tools/found_players.txt
-OUTPUT_FILE = Path(__file__).parent / "found_players.txt"
+# In-memory queue — no file I/O needed
+_player_queue: list[str] = []
+
+
+def get_queue() -> list[str]:
+    """Return the current in-memory player tag queue."""
+    return _player_queue
+
+
+def clear_queue() -> None:
+    """Clear the in-memory queue after inviting."""
+    _player_queue.clear()
 
 # CoC tags start with #; Android XML-encodes # as &#35; so handle both forms
 _TAG_RE   = re.compile(r"#([A-Z0-9]{4,12})")
@@ -60,18 +70,18 @@ def _read_http_clipboard() -> str | None:
 
 
 def _read_adb_clipboard(device: ADBDevice) -> str | None:
-    """Read Android clipboard via ADB — works on real Android devices."""
-    out = device._shell("service call clipboard 2 i32 1 2>/dev/null")
-    logger.debug("ADB clipboard raw: {}", repr(out[:200]))
-    # Decode UTF-16LE pairs from the parcel hex dump
-    # Each '...' quoted section has chars like 't.a.g.' — join them
-    chars = re.findall(r"'([^']+)'", out)
-    text = "".join(chars).replace(".", "").upper()
-    logger.debug("ADB clipboard decoded: {}", text)
-    match = _TAG_RE.search(text)
+    """Read Android clipboard via dumpsys — works on Android 10+ (bypasses security restriction)."""
+    out = device._shell("dumpsys clipboard 2>/dev/null")
+    logger.debug("dumpsys clipboard ({} chars): {}", len(out), repr(out[:300]))
+    # Look for the URL or raw tag in the dump
+    match = _TAG_RE_E.search(out.upper())
     if match:
         return f"#{match.group(1)}"
-    logger.warning("No CoC tag in ADB clipboard: {}", text[:100])
+    # Also try %23 URL-encoded form
+    url_match = re.search(r"tag=%23([A-Z0-9]{4,12})", out.upper())
+    if url_match:
+        return f"#{url_match.group(1)}"
+    logger.warning("No CoC tag in dumpsys clipboard output")
     return None
 
 
@@ -166,13 +176,9 @@ def find_players(device: ADBDevice) -> int:
         logger.info("No matching players in {}", clan_tag)
         return 0
 
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with OUTPUT_FILE.open("a") as fh:
-        for tag in matches:
-            fh.write(tag + "\n")
-
+    _player_queue.extend(matches)
     logger.success(
-        "Saved {} player(s) from {} → {}",
-        len(matches), clan_tag, OUTPUT_FILE,
+        "Queued {} player(s) from {} (total queued: {})",
+        len(matches), clan_tag, len(_player_queue),
     )
     return len(matches)

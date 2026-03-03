@@ -94,18 +94,20 @@ def _invite_one(device: ADBDevice, tag: str) -> None:
     _tap(device, *BACK_ARROW,   "Back",    delay=0.8)
 
 
-def invite_players(device: ADBDevice, standalone: bool = False) -> None:
+def invite_players(device: ADBDevice, standalone: bool = False, tags: list[str] | None = None) -> None:
     """
-    Invite all players listed in found_players.txt.
+    Invite all players in the given tag list (or from found_players.txt if no list given).
 
     Parameters
     ----------
     device     : connected ADBDevice
     standalone : if True, launches notice_board.py via subprocess when done
+    tags       : in-memory list of player tags; falls back to file if None
     """
-    tags = _read_tags()
+    if tags is None:
+        tags = _read_tags()
     if not tags:
-        logger.info("found_players.txt is empty — nothing to invite")
+        logger.info("No players queued — nothing to invite")
         _go_to_main(device)
         if standalone:
             _relaunch_notice_board()
@@ -125,10 +127,7 @@ def invite_players(device: ADBDevice, standalone: bool = False) -> None:
             _invite_one(device, tag)
         except Exception as exc:
             logger.error("Failed to invite {}: {}", tag, exc)
-        finally:
-            # Always remove from file whether invite succeeded or not,
-            # to avoid retrying a bad tag forever
-            _remove_tag(tag)
+        # No file removal needed — caller clears the in-memory queue
 
     logger.success("All invites sent.")
 
