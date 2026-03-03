@@ -82,6 +82,8 @@ _ADB_TARGETS: dict[str, tuple[str, int]] = {
 }
 
 _show_touches_enabled: bool = False  # tracks show_touches state for /showinputs
+_screenshot_feed_task: asyncio.Task | None = None
+_SCREENSHOT_FEED_CHANNEL_ID = 1478282184577257604
 
 _RESOLUTIONS: dict[str, tuple[int, int]] = {
     "1920x1080": (1920, 1080),
@@ -478,14 +480,49 @@ async def forcemenu_cmd(interaction: discord.Interaction) -> None:
 
 # ── /showinputs ───────────────────────────────────────────────────────────────
 
-@client.tree.command(name="showinputs", description="[Admin] Toggle tap-dot overlay on the device screen (BlueStacks only)")
-@app_commands.describe(state="on = show red dots for every tap, off = hide them")
+async def _screenshot_feed_loop() -> None:
+    """Post a fresh screenshot to the feed channel every 2.5s until stopped."""
+    channel = client.get_channel(_SCREENSHOT_FEED_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await client.fetch_channel(_SCREENSHOT_FEED_CHANNEL_ID)
+        except Exception as exc:
+            logger.error("[showinputs feed] Cannot get feed channel: {}", exc)
+            return
+
+    loop = asyncio.get_event_loop()
+    last_msg: discord.Message | None = None
+
+    while _show_touches_enabled:
+        try:
+            png = await loop.run_in_executor(None, _adb_screenshot_sync)
+            new_msg = await channel.send(file=discord.File(io.BytesIO(png), filename="screen.png"))
+            if last_msg is not None:
+                try:
+                    await last_msg.delete()
+                except Exception:
+                    pass
+            last_msg = new_msg
+        except Exception as exc:
+            logger.warning("[showinputs feed] {}", exc)
+        await asyncio.sleep(2.5)
+
+    # Feed stopped — clean up final message
+    if last_msg is not None:
+        try:
+            await last_msg.edit(content="🔴 Feed stopped.")
+        except Exception:
+            pass
+
+
+@client.tree.command(name="showinputs", description="[Admin] Toggle live screenshot feed with tap-dot overlay (BlueStacks only)")
+@app_commands.describe(state="on = start live feed with red tap dots, off = stop feed")
 @app_commands.choices(state=[
     app_commands.Choice(name="on",  value="on"),
     app_commands.Choice(name="off", value="off"),
 ])
 async def showinputs_cmd(interaction: discord.Interaction, state: str = "") -> None:
-    global _show_touches_enabled
+    global _show_touches_enabled, _screenshot_feed_task
     if not _is_admin(interaction):
         await interaction.response.send_message(_ADMIN_DENIED, ephemeral=True)
         return
@@ -499,34 +536,40 @@ async def showinputs_cmd(interaction: discord.Interaction, state: str = "") -> N
         )
         return
 
-    # Determine target state
     if state == "on":
         new_state = True
     elif state == "off":
         new_state = False
     else:
-        new_state = not _show_touches_enabled   # toggle if no arg
+        new_state = not _show_touches_enabled
 
-    value = "1" if new_state else "0"
     await interaction.response.defer()
+    loop = asyncio.get_event_loop()
+
     try:
-        loop = asyncio.get_event_loop()
         device = await loop.run_in_executor(None, _make_device)
         await loop.run_in_executor(
             None,
-            lambda: device._shell(f"settings put system show_touches {value}"),
+            lambda: device._shell(f"settings put system show_touches {'1' if new_state else '0'}"),
         )
-        _show_touches_enabled = new_state
-        label = "🔴 ON — red dots will appear on every tap" if new_state else "⚫ OFF — tap dots hidden"
-        # Post a screenshot so they can see it immediately
-        try:
-            png = await loop.run_in_executor(None, _adb_screenshot_sync)
-            file = discord.File(io.BytesIO(png), filename="screen.png")
-            await interaction.followup.send(f"👆 Show touches: **{label}**", file=file)
-        except Exception:
-            await interaction.followup.send(f"👆 Show touches: **{label}**")
     except Exception as exc:
         await interaction.followup.send(f"❌ ADB error: {exc}")
+        return
+
+    _show_touches_enabled = new_state
+
+    if new_state:
+        # Cancel any lingering task
+        if _screenshot_feed_task and not _screenshot_feed_task.done():
+            _screenshot_feed_task.cancel()
+        _screenshot_feed_task = asyncio.create_task(_screenshot_feed_loop())
+        await interaction.followup.send(
+            f"🔴 Tap dots **ON** — live feed posting to <#{_SCREENSHOT_FEED_CHANNEL_ID}> every 2.5s.\n"
+            f"Run `/showinputs off` to stop."
+        )
+    else:
+        # _show_touches_enabled=False makes the loop exit on next iteration
+        await interaction.followup.send("⚫ Tap dots **OFF** — feed stopping.")
 
 
 # ── /resolution ───────────────────────────────────────────────────────────────
