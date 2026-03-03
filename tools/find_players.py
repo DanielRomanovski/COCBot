@@ -11,6 +11,11 @@ import time
 import urllib.request
 from pathlib import Path
 
+# ── Watchdog heartbeat ────────────────────────────────────────────────────────
+# Updated every time _get_clan_tag successfully returns a tag.
+# notice_board.py monitors this to detect when the clipboard has gone silent.
+last_tag_time: float = 0.0
+
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -125,16 +130,26 @@ def _get_clan_tag(device: ADBDevice) -> str | None:
     # Try direct HTTP read first (works on BlueStacks / rooted / older Android)
     tag = _read_http_clipboard()
     if tag:
+        _record_tag_success()
         return tag
 
     # Android 10 restriction: background apps can't read clipboard.
     # Fix: bring Termux to foreground so it has permission, then return to CoC.
     tag = _read_clipboard_via_termux_foreground(device)
     if tag:
+        _record_tag_success()
         return tag
 
     # Last resort: ADB dumpsys (sometimes works on non-rooted Android 10)
-    return _read_adb_clipboard(device)
+    tag = _read_adb_clipboard(device)
+    if tag:
+        _record_tag_success()
+    return tag
+
+
+def _record_tag_success() -> None:
+    global last_tag_time
+    last_tag_time = time.time()
 
 
 # ── API fetch & filter ────────────────────────────────────────────────────────
