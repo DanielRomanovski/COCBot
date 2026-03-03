@@ -55,6 +55,9 @@ CLAN7_10_CHORDS = [
 
 DELAY_AFTER_TAP = 1.5
 
+# IP of the physical phone — used to decide whether Termux-restart is possible
+_PHONE_HOST = "10.0.0.47"
+
 # ── Watchdog ────────────────────────────────────────────────────────────────
 # If no clipboard tag is successfully read for this many seconds while
 # notice_board/find_players are running, trigger a recovery action.
@@ -125,15 +128,26 @@ def tap(device: ADBDevice, x: int, y: int, label: str):
 
 
 def _ensure_clipboard_server(device: ADBDevice) -> None:
-    """Ensure clipboard HTTP server is running; restart via Termux if not."""
+    """Ensure clipboard HTTP server is running; restart via Termux if not (phone only)."""
     url = f"http://{settings.adb_host}:8765/clipboard"
     try:
         urllib.request.urlopen(url, timeout=3)
         logger.info("Clipboard server online at {}", url)
         return
     except Exception:
-        logger.warning("Clipboard server offline — launching Termux to restart it")
+        pass
 
+    # On BlueStacks the clipboard_server.py runs on the Windows host — we can't
+    # restart it from the Docker container, so just warn and carry on.
+    if settings.adb_host != _PHONE_HOST:
+        logger.warning(
+            "Clipboard server at {} is offline — cannot restart from Docker "
+            "(BlueStacks host). Start clipboard_server.py on the Windows machine.",
+            url,
+        )
+        return
+
+    logger.warning("Clipboard server offline — launching Termux to restart it")
     device._shell("am start -n com.termux/.HomeActivity")
     time.sleep(2)
     device._shell("input keyevent 113")  # Ctrl+C to kill any running process
@@ -155,7 +169,7 @@ def _ensure_clipboard_server(device: ADBDevice) -> None:
 
     # Relaunch CoC and wait for it to fully load
     logger.info("Relaunching Clash of Clans...")
-    device._shell("am start -n com.supercell.clashofclans/com.supercell.clashofclans.GameApp")
+    device.launch_coc()
     time.sleep(20)  # slow phone — wait for full load
     logger.info("CoC should be loaded now")
 

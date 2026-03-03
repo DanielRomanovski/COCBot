@@ -37,6 +37,7 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 from loguru import logger
+import aiohttp
 
 load_dotenv(ROOT / ".env")
 
@@ -91,6 +92,43 @@ _SCREENSHOT_FEED_CHANNEL_ID = 1478282184577257604
 _invite_proc: asyncio.subprocess.Process | None = None
 _INVITE_LOG_FILE = Path("/tmp/notice_board.log")
 
+# ── Console webhook log streaming ────────────────────────────────────────
+_CONSOLE_WEBHOOK_URL = (
+    "https://discord.com/api/webhooks/1478481159158628456/"
+    "ob-qrDcgKz4z0nVfDP8KpG62b7bVZbzBsYDLbgzOnIC9d_2WlCm5pfuZq52Z1jDrx__q"
+)
+_webhook_task: asyncio.Task | None = None
+_webhook_log_cursor: int = 0   # number of lines already shipped to the webhook
+
+
+async def _webhook_log_streamer() -> None:
+    """Post every 25 new log lines to the #console webhook while the invite loop runs."""
+    global _webhook_log_cursor
+    _webhook_log_cursor = 0
+    async with aiohttp.ClientSession() as session:
+        while True:
+            await asyncio.sleep(5)
+            if not _INVITE_LOG_FILE.exists():
+                continue
+            lines = _INVITE_LOG_FILE.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
+            pending = lines[_webhook_log_cursor:]
+            while len(pending) >= 25:
+                chunk = pending[:25]
+                pending = pending[25:]
+                _webhook_log_cursor += 25
+                text = "\n".join(chunk)
+                if len(text) > 1950:
+                    text = "..." + text[-1947:]
+                try:
+                    await session.post(
+                        _CONSOLE_WEBHOOK_URL,
+                        json={"content": f"```\n{text}\n```", "username": "CoCBot Logs"},
+                    )
+                except Exception as exc:
+                    logger.warning("[webhook-log] POST failed: {}", exc)
+
 
 def _read_log_tail(lines: int = 20) -> str:
     """Return the last `lines` lines of the invite subprocess log."""
@@ -139,11 +177,16 @@ async def _start_invite_loop(moderate: bool) -> str:
             f"❌ Invite loop crashed immediately (code {_invite_proc.returncode}):\n"
             f"```\n{tail}\n```"
         )
+    # Start streaming logs to the #console webhook
+    global _webhook_task
+    if _webhook_task is not None and not _webhook_task.done():
+        _webhook_task.cancel()
+    _webhook_task = asyncio.create_task(_webhook_log_streamer())
     return f"✅ Invite loop started (PID {_invite_proc.pid})  •  moderate_on_invite={moderate}"
 
 
 async def _stop_invite_loop() -> str:
-    global _invite_proc
+    global _invite_proc, _webhook_task
     if _invite_proc is None or _invite_proc.returncode is not None:
         _invite_proc = None
         return "⚠️ Invite loop is not running."
@@ -154,6 +197,9 @@ async def _stop_invite_loop() -> str:
     except asyncio.TimeoutError:
         _invite_proc.kill()
     _invite_proc = None
+    if _webhook_task is not None and not _webhook_task.done():
+        _webhook_task.cancel()
+        _webhook_task = None
     try:
         await _adb_esc_cancel(3)
     except Exception as exc:
