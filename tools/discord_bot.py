@@ -77,7 +77,7 @@ CLAN_MAX  = 50
 # ── ADB targets (for /adbtarget testing command) ──────────────────────────────
 _ADB_TARGETS: dict[str, tuple[str, int]] = {
     "phone":      ("10.0.0.47",  5555),   # physical Android phone over WiFi
-    "bluestacks": ("127.0.0.1",  5556),   # Windows BlueStacks (local)
+    "bluestacks": ("10.0.0.156", 5556),   # Windows BlueStacks (LAN IP of Windows PC)
 }
 
 
