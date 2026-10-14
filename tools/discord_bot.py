@@ -94,8 +94,7 @@ _INVITE_LOG_FILE = Path("/tmp/notice_board.log")
 
 # ── Console webhook log streaming ────────────────────────────────────────
 _CONSOLE_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/1478481159158628456/"
-    "ob-qrDcgKz4z0nVfDP8KpG62b7bVZbzBsYDLbgzOnIC9d_2WlCm5pfuZq52Z1jDrx__q"
+#webbook goes here
 )
 _webhook_task: asyncio.Task | None = None
 _webhook_log_cursor: int = 0   # number of lines already shipped to the webhook
